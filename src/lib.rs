@@ -717,7 +717,7 @@ impl<'a> WebViewBuilder<'a> {
   /// [addDocumentStartJavaScript]: https://developer.android.com/reference/androidx/webkit/WebViewCompat#addDocumentStartJavaScript(android.webkit.WebView,java.lang.String,java.util.Set%3Cjava.lang.String%3E)
   /// [onPageStarted]: https://developer.android.com/reference/android/webkit/WebViewClient#onPageStarted(android.webkit.WebView,%20java.lang.String,%20android.graphics.Bitmap)
   pub fn with_initialization_script(self, js: &str) -> Self {
-    self.with_initialization_script_for_main_only(js, true)
+    self.with_initialization_script_for_main_only(js, false)
   }
 
   /// Same as [`with_initialization_script`](Self::with_initialization_script) but with option to inject into main frame only or sub frames.
@@ -736,12 +736,10 @@ impl<'a> WebViewBuilder<'a> {
   ///   .build(&window)
   ///   .unwrap();
   /// ```
-  pub fn with_initialization_script_for_main_only(self, js: &str, main_only: bool) -> Self {
+  pub fn with_initialization_script_for_main_only(self, js: &str, _main_only: bool) -> Self {
     self.and_then(|mut b| {
       if !js.is_empty() {
-        b.attrs
-          .initialization_scripts
-          .push((js.to_string(), main_only));
+        b.attrs.initialization_scripts.push((js.to_string(), false));
       }
       Ok(b)
     })
