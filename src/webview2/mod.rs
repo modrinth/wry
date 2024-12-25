@@ -387,6 +387,12 @@ impl InnerWebView {
   ) -> Result<ICoreWebView2> {
     let webview = unsafe { controller.CoreWebView2()? };
 
+    // Mute audio (for ads)
+    unsafe {
+      let cast = webview.cast::<ICoreWebView2_8>()?;
+      cast.SetIsMuted(true)?;
+    }
+
     // Theme
     if let Some(theme) = pl_attrs.theme {
       if let Err(error) = unsafe { set_theme(&webview, theme) } {
