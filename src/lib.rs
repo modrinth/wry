@@ -542,7 +542,7 @@ impl<'a> Default for WebViewAttributes<'a> {
       navigation_handler: None,
       download_started_handler: None,
       download_completed_handler: None,
-      new_window_req_handler: None,
+      new_window_req_handler: Some(Box::new(|_s| false)),
       clipboard: false,
       #[cfg(debug_assertions)]
       devtools: true,
