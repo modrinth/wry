@@ -2,6 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
+//! <p align="center"><img height="100" src="https://raw.githubusercontent.com/tauri-apps/wry/refs/heads/dev/.github/splash.png" alt="WRY Webview Rendering library" /></p>
+//!
+//! [![](https://img.shields.io/crates/v/wry?style=flat-square)](https://crates.io/crates/wry) [![](https://img.shields.io/docsrs/wry?style=flat-square)](https://docs.rs/wry/)
+//! [![License](https://img.shields.io/badge/License-MIT%20or%20Apache%202-green.svg)](https://opencollective.com/tauri)
+//! [![Chat Server](https://img.shields.io/badge/chat-discord-7289da.svg)](https://discord.gg/SpmNs4S)
+//! [![website](https://img.shields.io/badge/website-tauri.app-purple.svg)](https://tauri.app)
+//! [![https://good-labs.github.io/greater-good-affirmation/assets/images/badge.svg](https://good-labs.github.io/greater-good-affirmation/assets/images/badge.svg)](https://good-labs.github.io/greater-good-affirmation)
+//! [![support](https://img.shields.io/badge/sponsor-Open%20Collective-blue.svg)](https://opencollective.com/tauri)
+//!
 //! Wry is a Cross-platform WebView rendering library.
 //!
 //! The webview requires a running event loop and a window type that implements [`HasWindowHandle`],
@@ -11,22 +20,39 @@
 //! ## Examples
 //!
 //! This example leverages the [`HasWindowHandle`] and supports Windows, macOS, iOS, Android and Linux (X11 Only).
-//! See the following example using [`winit`].
+//! See the following example using [`winit`]:
 //!
 //! ```no_run
 //! # use wry::{WebViewBuilder, raw_window_handle};
-//! # use winit::{window::WindowBuilder, event_loop::EventLoop};
-//! let event_loop = EventLoop::new().unwrap();
-//! let window = WindowBuilder::new().build(&event_loop).unwrap();
+//! # use winit::{application::ApplicationHandler, event::WindowEvent, event_loop::{ActiveEventLoop, EventLoop}, window::{Window, WindowId}};
+//! #[derive(Default)]
+//! struct App {
+//!   window: Option<Window>,
+//!   webview: Option<wry::WebView>,
+//! }
 //!
-//! let webview = WebViewBuilder::new()
-//!   .with_url("https://tauri.app")
-//!   .build(&window)
-//!   .unwrap();
+//! impl ApplicationHandler for App {
+//!   fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+//!     let window = event_loop.create_window(Window::default_attributes()).unwrap();
+//!     let webview = WebViewBuilder::new()
+//!       .with_url("https://tauri.app")
+//!       .build(&window)
+//!       .unwrap();
+//!
+//!     self.window = Some(window);
+//!     self.webview = Some(webview);
+//!   }
+//!
+//!   fn window_event(&mut self, _event_loop: &ActiveEventLoop, _window_id: WindowId, event: WindowEvent) {}
+//! }
+//!
+//! let event_loop = EventLoop::new().unwrap();
+//! let mut app = App::default();
+//! event_loop.run_app(&mut app).unwrap();
 //! ```
 //!
 //! If you also want to support Wayland too, then we recommend you use [`WebViewBuilderExtUnix::new_gtk`] on Linux.
-//! See the following example using [`tao`].
+//! See the following example using [`tao`]:
 //!
 //! ```no_run
 //! # use wry::WebViewBuilder;
@@ -53,18 +79,35 @@
 //!
 //! ```no_run
 //! # use wry::{WebViewBuilder, raw_window_handle, Rect, dpi::*};
-//! # use winit::{window::WindowBuilder, event_loop::EventLoop};
-//! let event_loop = EventLoop::new().unwrap();
-//! let window = WindowBuilder::new().build(&event_loop).unwrap();
+//! # use winit::{application::ApplicationHandler, event::WindowEvent, event_loop::{ActiveEventLoop, EventLoop}, window::{Window, WindowId}};
+//! #[derive(Default)]
+//! struct App {
+//!   window: Option<Window>,
+//!   webview: Option<wry::WebView>,
+//! }
 //!
-//! let webview = WebViewBuilder::new()
-//!   .with_url("https://tauri.app")
-//!   .with_bounds(Rect {
-//!     position: LogicalPosition::new(100, 100).into(),
-//!     size: LogicalSize::new(200, 200).into(),
-//!   })
-//!   .build_as_child(&window)
-//!   .unwrap();
+//! impl ApplicationHandler for App {
+//!   fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+//!     let window = event_loop.create_window(Window::default_attributes()).unwrap();
+//!     let webview = WebViewBuilder::new()
+//!       .with_url("https://tauri.app")
+//!       .with_bounds(Rect {
+//!         position: LogicalPosition::new(100, 100).into(),
+//!         size: LogicalSize::new(200, 200).into(),
+//!       })
+//!       .build_as_child(&window)
+//!       .unwrap();
+//!
+//!     self.window = Some(window);
+//!     self.webview = Some(webview);
+//!   }
+//!
+//!   fn window_event(&mut self, _event_loop: &ActiveEventLoop, _window_id: WindowId, event: WindowEvent) {}
+//! }
+//!
+//! let event_loop = EventLoop::new().unwrap();
+//! let mut app = App::default();
+//! event_loop.run_app(&mut app).unwrap();
 //! ```
 //!
 //! If you want to support X11 and Wayland at the same time, we recommend using
@@ -102,39 +145,128 @@
 //!
 //! ## Platform Considerations
 //!
-//! Note that on Linux, we use webkit2gtk webviews so if the windowing library doesn't support gtk (as in [`winit`])
+//! Here is the underlying web engine each platform uses, and some dependencies you might need to install.
+//!
+//! ### Linux
+//!
+//! [WebKitGTK](https://webkitgtk.org/) is used to provide webviews on Linux which requires GTK,
+//! so if the windowing library doesn't support GTK (as in [`winit`])
 //! you'll need to call [`gtk::init`] before creating the webview and then call [`gtk::main_iteration_do`] alongside
 //! your windowing library event loop.
 //!
 //! ```no_run
-//! # use winit::{event_loop::EventLoop, window::Window};
-//! # use wry::{WebView, WebViewAttributes};
-//! #[cfg(target_os = "linux")]
-//! gtk::init().unwrap(); // <----- IMPORTANT
-//! let event_loop = EventLoop::new().unwrap();
+//! # use wry::{WebView, WebViewBuilder};
+//! # use winit::{application::ApplicationHandler, event::WindowEvent, event_loop::{ActiveEventLoop, EventLoop}, window::{Window, WindowId}};
+//! #[derive(Default)]
+//! struct App {
+//!   webview_window: Option<(Window, WebView)>,
+//! }
 //!
-//! let window = Window::new(&event_loop).unwrap();
-//! let webview = WebView::new(&window, WebViewAttributes::default());
+//! impl ApplicationHandler for App {
+//!   fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+//!     let window = event_loop.create_window(Window::default_attributes()).unwrap();
+//!     let webview = WebViewBuilder::new()
+//!       .with_url("https://tauri.app")
+//!       .build(&window)
+//!       .unwrap();
 //!
-//! event_loop.run(|_e, _evl|{
-//!   // process winit events
-//!
-//!   // then advance gtk event loop  <----- IMPORTANT
-//!   #[cfg(target_os = "linux")]
-//!   while gtk::events_pending() {
-//!     gtk::main_iteration_do(false);
+//!     self.webview_window = Some((window, webview));
 //!   }
-//! }).unwrap();
+//!
+//!   fn window_event(&mut self, _event_loop: &ActiveEventLoop, _window_id: WindowId, event: WindowEvent) {}
+//!
+//!   // Advance GTK event loop <!----- IMPORTANT
+//!   fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+//!     #[cfg(target_os = "linux")]
+//!     while gtk::events_pending() {
+//!       gtk::main_iteration_do(false);
+//!     }
+//!   }
+//! }
+//!
+//! let event_loop = EventLoop::new().unwrap();
+//! let mut app = App::default();
+//! event_loop.run_app(&mut app).unwrap();
 //! ```
 //!
-//! ## Android
+//! #### Linux Dependencies
+//!
+//! ##### Arch Linux / Manjaro:
+//!
+//! ```bash
+//! sudo pacman -S webkit2gtk-4.1
+//! ```
+//!
+//! ##### Debian / Ubuntu:
+//!
+//! ```bash
+//! sudo apt install libwebkit2gtk-4.1-dev
+//! ```
+//!
+//! ##### Fedora
+//!
+//! ```bash
+//! sudo dnf install gtk3-devel webkit2gtk4.1-devel
+//! ```
+//!
+//! ##### Nix & NixOS
+//!
+//! ```nix
+//! # shell.nix
+//!
+//! let
+//!    # Unstable Channel | Rolling Release
+//!    pkgs = import (fetchTarball("channel:nixpkgs-unstable")) { };
+//!    packages = with pkgs; [
+//!      pkg-config
+//!      webkitgtk_4_1
+//!    ];
+//!  in
+//!  pkgs.mkShell {
+//!    buildInputs = packages;
+//!  }
+//! ```
+//!
+//! ```sh
+//! nix-shell shell.nix
+//! ```
+//!
+//! ##### GUIX
+//!
+//! ```scheme
+//! ;; manifest.scm
+//!
+//! (specifications->manifest
+//!   '("pkg-config"                ; Helper tool used when compiling
+//!     "webkitgtk"                 ; Web content engine fot GTK+
+//!  ))
+//! ```
+//!
+//! ```bash
+//! guix shell -m manifest.scm
+//! ```
+//!
+//! ### macOS
+//!
+//! WebKit is native on macOS so everything should be fine.
+//!
+//! If you are cross-compiling for macOS using [osxcross](https://github.com/tpoechtrager/osxcross) and encounter a runtime panic like `Class with name WKWebViewConfiguration could not be found` it's possible that `WebKit.framework` has not been linked correctly, to fix this set the `RUSTFLAGS` environment variable:
+//!
+//! ```bash
+//! RUSTFLAGS="-l framework=WebKit" cargo build --target=x86_64-apple-darwin --release
+//! ```
+//! ### Windows
+//!
+//! WebView2 provided by Microsoft Edge Chromium is used. So wry supports Windows 7, 8, 10 and 11.
+//!
+//! ### Android
 //!
 //! In order for `wry` to be able to create webviews on Android, there is a few requirements that your application needs to uphold:
 //! 1. You need to set a few environment variables that will be used to generate the necessary kotlin
-//! files that you need to include in your Android application for wry to function properly.
-//!     - `WRY_ANDROID_PACKAGE`: which is the reversed domain name of your android project and the app name in snake_case, for example, `com.wry.example.wry_app`
-//!     - `WRY_ANDROID_LIBRARY`: for example, if your cargo project has a lib name `wry_app`, it will generate `libwry_app.so` so you se this env var to `wry_app`
-//!     - `WRY_ANDROID_KOTLIN_FILES_OUT_DIR`: for example, `path/to/app/src/main/kotlin/com/wry/example`
+//!    files that you need to include in your Android application for wry to function properly.
+//!    - `WRY_ANDROID_PACKAGE`: which is the reversed domain name of your android project and the app name in snake_case, for example, `com.wry.example.wry_app`
+//!    - `WRY_ANDROID_LIBRARY`: for example, if your cargo project has a lib name `wry_app`, it will generate `libwry_app.so` so you se this env var to `wry_app`
+//!    - `WRY_ANDROID_KOTLIN_FILES_OUT_DIR`: for example, `path/to/app/src/main/kotlin/com/wry/example`
 //! 2. Your main Android Activity needs to inherit `AppCompatActivity`, preferably it should use the generated `WryActivity` or inherit it.
 //! 3. Your Rust app needs to call `wry::android_setup` function to setup the necessary logic to be able to create webviews later on.
 //! 4. Your Rust app needs to call `wry::android_binding!` macro to setup the JNI functions that will be called by `WryActivity` and various other places.
@@ -164,22 +296,42 @@
 //! Wry uses a set of feature flags to toggle several advanced features.
 //!
 //! - `os-webview` (default): Enables the default WebView framework on the platform. This must be enabled
-//! for the crate to work. This feature was added in preparation of other ports like cef and servo.
+//!   for the crate to work. This feature was added in preparation of other ports like cef and servo.
 //! - `protocol` (default): Enables [`WebViewBuilder::with_custom_protocol`] to define custom URL scheme for handling tasks like
-//! loading assets.
+//!   loading assets.
 //! - `drag-drop` (default): Enables [`WebViewBuilder::with_drag_drop_handler`] to control the behaviour when there are files
-//! interacting with the window.
+//!   interacting with the window.
 //! - `devtools`: Enables devtools on release builds. Devtools are always enabled in debug builds.
-//! On **macOS**, enabling devtools, requires calling private apis so you should not enable this flag in release
-//! build if your app needs to publish to App Store.
+//!   On **macOS**, enabling devtools, requires calling private apis so you should not enable this flag in release
+//!   build if your app needs to publish to App Store.
 //! - `transparent`: Transparent background on **macOS** requires calling private functions.
-//! Avoid this in release build if your app needs to publish to App Store.
+//!   Avoid this in release build if your app needs to publish to App Store.
 //! - `fullscreen`: Fullscreen video and other media on **macOS** requires calling private functions.
-//! Avoid this in release build if your app needs to publish to App Store.
-//! libraries and prevent from building documentation on doc.rs fails.
+//!   Avoid this in release build if your app needs to publish to App Store.
+//!   libraries and prevent from building documentation on doc.rs fails.
 //! - `linux-body`: Enables body support of custom protocol request on Linux. Requires
-//! webkit2gtk v2.40 or above.
+//!   webkit2gtk v2.40 or above.
 //! - `tracing`: enables [`tracing`] for `evaluate_script`, `ipc_handler` and `custom_protocols.
+//!
+//! ## Partners
+//!
+//! <table>
+//!   <tbody>
+//!     <tr>
+//!       <td align="center" valign="middle">
+//!         <a href="https://crabnebula.dev" target="_blank">
+//!           <img src=".github/sponsors/crabnebula.svg" alt="CrabNebula" width="283">
+//!         </a>
+//!       </td>
+//!     </tr>
+//!   </tbody>
+//! </table>
+//!
+//! For the complete list of sponsors please visit our [website](https://tauri.app#sponsors) and [Open Collective](https://opencollective.com/tauri).
+//!
+//! ## License
+//!
+//! Apache-2.0/MIT
 //!
 //! [`tao`]: https://docs.rs/tao
 //! [`winit`]: https://docs.rs/winit
@@ -254,6 +406,10 @@ pub use error::*;
 pub use http;
 pub use proxy::{ProxyConfig, ProxyEndpoint};
 pub use web_context::WebContext;
+
+#[cfg(target_os = "ios")]
+pub type InputAccessoryViewBuilder =
+  dyn Fn(&objc2_ui_kit::UIView) -> Option<Retained<objc2_ui_kit::UIView>>;
 
 /// A rectangular region.
 #[derive(Clone, Copy, Debug)]
@@ -361,14 +517,16 @@ pub struct WebViewAttributes<'a> {
   /// When webview load a new page, this initialization code will be executed.
   /// It is guaranteed that code is executed before `window.onload`.
   ///
-  /// Second parameter represents if script should be added to main frame only or sub frames also.
-  /// `true` for main frame only, `false` for sub frames.
-  ///
   /// ## Platform-specific
   ///
-  /// - **Android:** The Android WebView does not provide an API for initialization scripts,
-  /// so we prepend them to each HTML head. They are only implemented on custom protocol URLs.
-  pub initialization_scripts: Vec<(String, bool)>,
+  /// - **Windows**: scripts are always injected into sub frames.
+  /// - **Android:** When [addDocumentStartJavaScript] is not supported,
+  ///   we prepend them to each HTML head (implementation only supported on custom protocol URLs).
+  ///   For remote URLs, we use [onPageStarted] which is not guaranteed to run before other scripts.
+  ///
+  /// [addDocumentStartJavaScript]: https://developer.android.com/reference/androidx/webkit/WebViewCompat#addDocumentStartJavaScript(android.webkit.WebView,java.lang.String,java.util.Set%3Cjava.lang.String%3E)
+  /// [onPageStarted]: https://developer.android.com/reference/android/webkit/WebViewClient#onPageStarted(android.webkit.WebView,%20java.lang.String,%20android.graphics.Bitmap)
+  pub initialization_scripts: Vec<InitializationScript>,
 
   /// A list of custom loading protocols with pairs of scheme uri string and a handling
   /// closure.
@@ -392,7 +550,7 @@ pub struct WebViewAttributes<'a> {
   /// # Reading assets on mobile
   ///
   /// - Android: Android has `assets` and `resource` path finder to
-  /// locate your files in those directories. For more information, see [Loading in-app content](https://developer.android.com/guide/webapps/load-local-content) page.
+  ///   locate your files in those directories. For more information, see [Loading in-app content](https://developer.android.com/guide/webapps/load-local-content) page.
   /// - iOS: To get the path of your assets, you can call [`CFBundle::resources_path`](https://docs.rs/core-foundation/latest/core_foundation/bundle/struct.CFBundle.html#method.resources_path). So url like `wry://assets/index.html` could get the html file in assets directory.
   pub custom_protocols:
     HashMap<String, Box<dyn Fn(WebViewId, Request<Vec<u8>>, RequestAsyncResponder)>>,
@@ -440,7 +598,7 @@ pub struct WebViewAttributes<'a> {
   /// ## Platform-specific:
   ///
   /// - **macOS**: The second parameter indicating the path the file was saved to, is always empty,
-  /// due to API limitations.
+  ///   due to API limitations.
   pub download_completed_handler: Option<Rc<dyn Fn(String, Option<PathBuf>, bool) + 'static>>,
 
   /// A new window handler to decide if incoming url is allowed to open in a new window.
@@ -463,7 +621,7 @@ pub struct WebViewAttributes<'a> {
   /// ## Platform-specific
   ///
   /// - macOS: This will call private functions on **macOS**. It is enabled in **debug** builds,
-  /// but requires `devtools` feature flag to actually enable it in **release** builds.
+  ///   but requires `devtools` feature flag to actually enable it in **release** builds.
   /// - Android: Open `chrome://inspect/#devices` in Chrome to get the devtools window. Wry's `WebView` devtools API isn't supported on Android.
   /// - iOS: Open Safari > Develop > [Your Device Name] > [Your WebView] to get the devtools window.
   pub devtools: bool,
@@ -480,7 +638,7 @@ pub struct WebViewAttributes<'a> {
   /// ## Platform-specific:
   ///
   /// - Windows: Setting to `false` does nothing on WebView2 Runtime version before 92.0.902.0,
-  /// see https://learn.microsoft.com/en-us/microsoft-edge/webview2/release-notes/archive?tabs=dotnetcsharp#10902-prerelease
+  ///   see https://learn.microsoft.com/en-us/microsoft-edge/webview2/release-notes/archive?tabs=dotnetcsharp#10902-prerelease
   ///
   /// - **Android / iOS:** Unsupported.
   pub back_forward_navigation_gestures: bool,
@@ -493,9 +651,10 @@ pub struct WebViewAttributes<'a> {
   ///
   /// ## Platform-specific:
   ///
-  /// - Windows: Requires WebView2 Runtime version 101.0.1210.39 or higher, does nothing on older versions,
-  /// see https://learn.microsoft.com/en-us/microsoft-edge/webview2/release-notes/archive?tabs=dotnetcsharp#10121039
+  /// - **Windows**: Requires WebView2 Runtime version 101.0.1210.39 or higher, does nothing on older versions,
+  ///   see https://learn.microsoft.com/en-us/microsoft-edge/webview2/release-notes/archive?tabs=dotnetcsharp#10121039
   /// - **Android:** Unsupported yet.
+  /// - **macOS / iOS**: Uses the nonPersistent DataStore.
   pub incognito: bool,
 
   /// Whether all media can be played without user interaction.
@@ -521,9 +680,27 @@ pub struct WebViewAttributes<'a> {
   /// This is only effective if the webview was created by [`WebView::new_as_child`] or [`WebViewBuilder::new_as_child`]
   /// or on Linux, if was created by [`WebViewExtUnix::new_gtk`] or [`WebViewBuilderExtUnix::new_gtk`] with [`gtk::Fixed`].
   pub bounds: Option<Rect>,
+
+  /// Whether background throttling should be disabled.
+  ///
+  /// By default, browsers throttle timers and even unload the whole tab (view) to free resources after roughly 5 minutes when
+  /// a view became minimized or hidden. This will permanently suspend all tasks until the documents visibility state
+  /// changes back from hidden to visible by bringing the view back to the foreground.
+  ///
+  /// ## Platform-specific
+  ///
+  /// - **Linux / Windows / Android**: Unsupported. Workarounds like a pending WebLock transaction might suffice.
+  /// - **iOS**: Supported since version 17.0+.
+  /// - **macOS**: Supported since version 14.0+.
+  ///
+  /// see https://github.com/tauri-apps/tauri/issues/5250#issuecomment-2569380578
+  pub background_throttling: Option<BackgroundThrottlingPolicy>,
+
+  /// Whether JavaScript should be disabled.
+  pub javascript_disabled: bool,
 }
 
-impl<'a> Default for WebViewAttributes<'a> {
+impl Default for WebViewAttributes<'_> {
   fn default() -> Self {
     Self {
       id: Default::default(),
@@ -561,6 +738,8 @@ impl<'a> Default for WebViewAttributes<'a> {
         position: dpi::LogicalPosition::new(0, 0).into(),
         size: dpi::LogicalSize::new(200, 200).into(),
       }),
+      background_throttling: None,
+      javascript_disabled: false,
     }
   }
 }
@@ -593,8 +772,10 @@ impl<'a> WebViewBuilder<'a> {
 
   /// Create a new [`WebViewBuilder`] with a web context that can be shared with multiple [`WebView`]s.
   pub fn with_web_context(web_context: &'a mut WebContext) -> Self {
-    let mut attrs = WebViewAttributes::default();
-    attrs.context = Some(web_context);
+    let attrs = WebViewAttributes {
+      context: Some(web_context),
+      ..Default::default()
+    };
 
     Self {
       inner: Ok(WebviewBuilderParts {
@@ -695,12 +876,7 @@ impl<'a> WebViewBuilder<'a> {
   /// `window.onload`.
   ///
   /// ## Example
-  /// ```no_run
-  /// # use wry::{WebViewBuilder, raw_window_handle, Rect, dpi::*};
-  /// # use winit::{window::WindowBuilder, event_loop::EventLoop};
-  /// let event_loop = EventLoop::new().unwrap();
-  /// let window = WindowBuilder::new().build(&event_loop).unwrap();
-  ///
+  /// ```ignore
   /// let webview = WebViewBuilder::new()
   ///   .with_initialization_script("console.log('Running inside main frame only')")
   ///   .with_url("https://tauri.app")
@@ -710,25 +886,21 @@ impl<'a> WebViewBuilder<'a> {
   ///
   /// ## Platform-specific
   ///
+  ///- **Windows:** scripts are always added to subframes.
   /// - **Android:** When [addDocumentStartJavaScript] is not supported,
-  /// we prepend them to each HTML head (implementation only supported on custom protocol URLs).
-  /// For remote URLs, we use [onPageStarted] which is not guaranteed to run before other scripts.
+  ///   we prepend them to each HTML head (implementation only supported on custom protocol URLs).
+  ///   For remote URLs, we use [onPageStarted] which is not guaranteed to run before other scripts.
   ///
   /// [addDocumentStartJavaScript]: https://developer.android.com/reference/androidx/webkit/WebViewCompat#addDocumentStartJavaScript(android.webkit.WebView,java.lang.String,java.util.Set%3Cjava.lang.String%3E)
   /// [onPageStarted]: https://developer.android.com/reference/android/webkit/WebViewClient#onPageStarted(android.webkit.WebView,%20java.lang.String,%20android.graphics.Bitmap)
-  pub fn with_initialization_script(self, js: &str) -> Self {
+  pub fn with_initialization_script<S: Into<String>>(self, js: S) -> Self {
     self.with_initialization_script_for_main_only(js, false)
   }
 
   /// Same as [`with_initialization_script`](Self::with_initialization_script) but with option to inject into main frame only or sub frames.
   ///
   /// ## Example
-  /// ```no_run
-  /// # use wry::{WebViewBuilder, raw_window_handle, Rect, dpi::*};
-  /// # use winit::{window::WindowBuilder, event_loop::EventLoop};
-  /// let event_loop = EventLoop::new().unwrap();
-  /// let window = WindowBuilder::new().build(&event_loop).unwrap();
-  ///
+  /// ```ignore
   /// let webview = WebViewBuilder::new()
   ///   .with_initialization_script_for_main_only("console.log('Running inside main frame only')", true)
   ///   .with_initialization_script_for_main_only("console.log('Running  main frame and sub frames')", false)
@@ -736,10 +908,25 @@ impl<'a> WebViewBuilder<'a> {
   ///   .build(&window)
   ///   .unwrap();
   /// ```
-  pub fn with_initialization_script_for_main_only(self, js: &str, _main_only: bool) -> Self {
+  ///
+  /// ## Platform-specific:
+  ///
+  /// - **Windows:** scripts are always added to subframes regardless of the `for_main_frame_only` option.
+  /// - **Android**: When [addDocumentStartJavaScript] is not supported, scripts are always injected into main frame only.
+  ///
+  /// [addDocumentStartJavaScript]: https://developer.android.com/reference/androidx/webkit/WebViewCompat#addDocumentStartJavaScript(android.webkit.WebView,java.lang.String,java.util.Set%3Cjava.lang.String%3E)
+  pub fn with_initialization_script_for_main_only<S: Into<String>>(
+    self,
+    js: S,
+    _for_main_frame_only: bool,
+  ) -> Self {
     self.and_then(|mut b| {
-      if !js.is_empty() {
-        b.attrs.initialization_scripts.push((js.to_string(), false));
+      let script = js.into();
+      if !script.is_empty() {
+        b.attrs.initialization_scripts.push(InitializationScript {
+          script,
+          for_main_frame_only: false,
+        });
       }
       Ok(b)
     })
@@ -765,10 +952,10 @@ impl<'a> WebViewBuilder<'a> {
   /// # Reading assets on mobile
   ///
   /// - Android: For loading content from the `assets` folder (which is copied to the Andorid apk) please
-  /// use the function [`with_asset_loader`] from [`WebViewBuilderExtAndroid`] instead.
-  /// This function on Android can only be used to serve assets you can embed in the binary or are
-  /// elsewhere in Android (provided the app has appropriate access), but not from the `assets`
-  /// folder which lives within the apk. For the cases where this can be used, it works the same as in macOS and Linux.
+  ///   use the function [`with_asset_loader`] from [`WebViewBuilderExtAndroid`] instead.
+  ///   This function on Android can only be used to serve assets you can embed in the binary or are
+  ///   elsewhere in Android (provided the app has appropriate access), but not from the `assets`
+  ///   folder which lives within the apk. For the cases where this can be used, it works the same as in macOS and Linux.
   /// - iOS: To get the path of your assets, you can call [`CFBundle::resources_path`](https://docs.rs/core-foundation/latest/core_foundation/bundle/struct.CFBundle.html#method.resources_path). So url like `wry://assets/index.html` could get the html file in assets directory.
   #[cfg(feature = "protocol")]
   pub fn with_custom_protocol<F>(self, name: String, handler: F) -> Self
@@ -806,6 +993,16 @@ impl<'a> WebViewBuilder<'a> {
   /// Same as [`Self::with_custom_protocol`] but with an asynchronous responder.
   ///
   /// When registering a custom protocol with the same name, only the last regisered one will be used.
+  ///
+  /// # Warning
+  ///
+  /// Pages loaded from custom protocol will have different Origin on different platforms. And
+  /// servers which enforce CORS will need to add exact same Origin header in `Access-Control-Allow-Origin`
+  /// if you wish to send requests with native `fetch` and `XmlHttpRequest` APIs. Here are the
+  /// different Origin headers across platforms:
+  ///
+  /// - macOS, iOS and Linux: `<scheme_name>://<path>` (so it will be `wry://path/to/page).
+  /// - Windows and Android: `http://<scheme_name>.<path>` by default (so it will be `http://wry.path/to/page`). To use `https` instead of `http`, use [`WebViewBuilderExtWindows::with_https_scheme`] and [`WebViewBuilderExtAndroid::with_https_scheme`].
   ///
   /// # Examples
   ///
@@ -942,7 +1139,7 @@ impl<'a> WebViewBuilder<'a> {
   /// ## Platform-specific
   ///
   /// - Windows: Requires WebView2 Runtime version 86.0.616.0 or higher, does nothing on older versions,
-  /// see https://learn.microsoft.com/en-us/microsoft-edge/webview2/release-notes/archive?tabs=dotnetcsharp#10790-prerelease
+  ///   see https://learn.microsoft.com/en-us/microsoft-edge/webview2/release-notes/archive?tabs=dotnetcsharp#10790-prerelease
   pub fn with_user_agent(self, user_agent: impl Into<String>) -> Self {
     self.and_then(|mut b| {
       b.attrs.user_agent = Some(user_agent.into());
@@ -958,7 +1155,7 @@ impl<'a> WebViewBuilder<'a> {
   /// ## Platform-specific
   ///
   /// - macOS: This will call private functions on **macOS**. It is enabled in **debug** builds,
-  /// but requires `devtools` feature flag to actually enable it in **release** builds.
+  ///   but requires `devtools` feature flag to actually enable it in **release** builds.
   /// - Android: Open `chrome://inspect/#devices` in Chrome to get the devtools window. Wry's `WebView` devtools API isn't supported on Android.
   /// - iOS: Open Safari > Develop > [Your Device Name] > [Your WebView] to get the devtools window.
   pub fn with_devtools(self, devtools: bool) -> Self {
@@ -973,7 +1170,7 @@ impl<'a> WebViewBuilder<'a> {
   /// ## Platform-specific
   ///
   /// - Windows: Setting to `false` can't disable pinch zoom on WebView2 Runtime version before 91.0.865.0,
-  /// see https://learn.microsoft.com/en-us/microsoft-edge/webview2/release-notes/archive?tabs=dotnetcsharp#10865-prerelease
+  ///   see https://learn.microsoft.com/en-us/microsoft-edge/webview2/release-notes/archive?tabs=dotnetcsharp#10865-prerelease
   ///
   /// - **macOS / Linux / Android / iOS**: Unsupported
   pub fn with_hotkeys_zoom(self, zoom: bool) -> Self {
@@ -996,7 +1193,7 @@ impl<'a> WebViewBuilder<'a> {
 
   /// Set a download started handler to manage incoming downloads.
   ///
-  //// The closure takes two parameters, the first is a `String` representing the url being downloaded from and and the
+  /// The closure takes two parameters, the first is a `String` representing the url being downloaded from and and the
   /// second is a mutable `PathBuf` reference that (possibly) represents where the file will be downloaded to. The latter
   /// parameter can be used to set the download location by assigning a new path to it, the assigned path _must_ be
   /// absolute. The closure returns a `bool` to allow or deny the download.
@@ -1022,7 +1219,7 @@ impl<'a> WebViewBuilder<'a> {
   /// ## Platform-specific:
   ///
   /// - **macOS**: The second parameter indicating the path the file was saved to, is always empty,
-  /// due to API limitations.
+  ///   due to API limitations.
   pub fn with_download_completed_handler(
     self,
     download_completed_handler: impl Fn(String, Option<PathBuf>, bool) + 'static,
@@ -1081,7 +1278,7 @@ impl<'a> WebViewBuilder<'a> {
   /// ## Platform-specific:
   ///
   /// - Windows: Requires WebView2 Runtime version 101.0.1210.39 or higher, does nothing on older versions,
-  /// see https://learn.microsoft.com/en-us/microsoft-edge/webview2/release-notes/archive?tabs=dotnetcsharp#10121039
+  ///   see https://learn.microsoft.com/en-us/microsoft-edge/webview2/release-notes/archive?tabs=dotnetcsharp#10121039
   /// - **Android:** Unsupported yet.
   pub fn with_incognito(self, incognito: bool) -> Self {
     self.and_then(|mut b| {
@@ -1136,6 +1333,33 @@ impl<'a> WebViewBuilder<'a> {
     })
   }
 
+  /// Set whether background throttling should be disabled.
+  ///
+  /// By default, browsers throttle timers and even unload the whole tab (view) to free resources after roughly 5 minutes when
+  /// a view became minimized or hidden. This will permanently suspend all tasks until the documents visibility state
+  /// changes back from hidden to visible by bringing the view back to the foreground.
+  ///
+  /// ## Platform-specific
+  ///
+  /// - **Linux / Windows / Android**: Unsupported. Workarounds like a pending WebLock transaction might suffice.
+  /// - **iOS**: Supported since version 17.0+.
+  /// - **macOS**: Supported since version 14.0+.
+  ///
+  /// see https://github.com/tauri-apps/tauri/issues/5250#issuecomment-2569380578
+  pub fn with_background_throttling(self, policy: BackgroundThrottlingPolicy) -> Self {
+    self.and_then(|mut b| {
+      b.attrs.background_throttling = Some(policy);
+      Ok(b)
+    })
+  }
+  /// Whether JavaScript should be disabled.
+  pub fn with_javascript_disabled(self) -> Self {
+    self.and_then(|mut b| {
+      b.attrs.javascript_disabled = true;
+      Ok(b)
+    })
+  }
+
   /// Consume the builder and create the [`WebView`] from a type that implements [`HasWindowHandle`].
   ///
   /// # Platform-specific:
@@ -1165,9 +1389,9 @@ impl<'a> WebViewBuilder<'a> {
   ///
   /// - **Windows**: This will create the webview as a child window of the `parent` window.
   /// - **macOS**: This will create the webview as a `NSView` subview of the `parent` window's
-  /// content view.
+  ///   content view.
   /// - **Linux**: This will create the webview as a child window of the `parent` window. Only X11
-  /// is supported. This method won't work on Wayland.
+  ///   is supported. This method won't work on Wayland.
   ///
   ///   Although this methods only needs an X11 window handle, you use webkit2gtk, so you still need to initialize gtk
   ///   by callling [`gtk::init`] and advance its loop alongside your event loop using [`gtk::main_iteration_do`].
@@ -1189,26 +1413,105 @@ impl<'a> WebViewBuilder<'a> {
   }
 }
 
-#[cfg(any(target_os = "macos", target_os = "ios",))]
-#[derive(Clone, Default)]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 pub(crate) struct PlatformSpecificWebViewAttributes {
   data_store_identifier: Option<[u8; 16]>,
+  traffic_light_inset: Option<dpi::Position>,
+  allow_link_preview: bool,
+  #[cfg(target_os = "ios")]
+  input_accessory_view_builder: Option<Box<InputAccessoryViewBuilder>>,
 }
 
-#[cfg(any(target_os = "macos", target_os = "ios",))]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+impl Default for PlatformSpecificWebViewAttributes {
+  fn default() -> Self {
+    Self {
+      data_store_identifier: None,
+      traffic_light_inset: None,
+      // platform default for this is true
+      allow_link_preview: true,
+      #[cfg(target_os = "ios")]
+      input_accessory_view_builder: None,
+    }
+  }
+}
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 pub trait WebViewBuilderExtDarwin {
   /// Initialize the WebView with a custom data store identifier.
   /// Can be used as a replacement for data_directory not being available in WKWebView.
   ///
   /// - **macOS / iOS**: Available on macOS >= 14 and iOS >= 17
+  ///
+  /// Note: Enable incognito mode to use the `nonPersistent` DataStore.
   fn with_data_store_identifier(self, identifier: [u8; 16]) -> Self;
+  /// Move the window controls to the specified position.
+  /// Normally this is handled by the Window but because `WebViewBuilder::build()` overwrites the window's NSView the controls will flicker on resizing.
+  /// Note: This method has no effects if the WebView is injected via `WebViewBuilder::build_as_child();` and there should be no flickers.
+  /// Warning: Do not use this if your chosen window library does not support traffic light insets.
+  /// Warning: Only use this in **decorated** windows with a **hidden titlebar**!
+  fn with_traffic_light_inset<P: Into<dpi::Position>>(self, position: P) -> Self;
+  /// Whether to show a link preview when long pressing on links. Available on macOS and iOS only.
+  ///
+  /// Default is true.
+  ///
+  /// See https://developer.apple.com/documentation/webkit/wkwebview/allowslinkpreview
+  fn with_allow_link_preview(self, allow_link_preview: bool) -> Self;
 }
 
-#[cfg(any(target_os = "macos", target_os = "ios",))]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 impl WebViewBuilderExtDarwin for WebViewBuilder<'_> {
   fn with_data_store_identifier(self, identifier: [u8; 16]) -> Self {
     self.and_then(|mut b| {
       b.platform_specific.data_store_identifier = Some(identifier);
+      Ok(b)
+    })
+  }
+
+  fn with_traffic_light_inset<P: Into<dpi::Position>>(self, position: P) -> Self {
+    self.and_then(|mut b| {
+      b.platform_specific.traffic_light_inset = Some(position.into());
+      Ok(b)
+    })
+  }
+
+  fn with_allow_link_preview(self, allow_link_preview: bool) -> Self {
+    self.and_then(|mut b| {
+      b.platform_specific.allow_link_preview = allow_link_preview;
+      Ok(b)
+    })
+  }
+}
+
+#[cfg(target_os = "ios")]
+pub trait WebViewBuilderExtIos {
+  /// Allows overriding the the keyboard accessory view on iOS.
+  /// Returning `None` effectively removes the view.
+  ///
+  /// The closure parameter is the webview instance.
+  ///
+  /// The accessory view is the view that appears above the keyboard when a text input element is focused.
+  /// It usually displays a view with "Done", "Next" buttons.
+  fn with_input_accessory_view_builder<
+    F: Fn(&objc2_ui_kit::UIView) -> Option<Retained<objc2_ui_kit::UIView>> + 'static,
+  >(
+    self,
+    builder: F,
+  ) -> Self;
+}
+
+#[cfg(target_os = "ios")]
+impl WebViewBuilderExtIos for WebViewBuilder<'_> {
+  fn with_input_accessory_view_builder<
+    F: Fn(&objc2_ui_kit::UIView) -> Option<Retained<objc2_ui_kit::UIView>> + 'static,
+  >(
+    self,
+    builder: F,
+  ) -> Self {
+    self.and_then(|mut b| {
+      b.platform_specific
+        .input_accessory_view_builder
+        .replace(Box::new(builder));
       Ok(b)
     })
   }
@@ -1224,6 +1527,7 @@ pub(crate) struct PlatformSpecificWebViewAttributes {
   scroll_bar_style: ScrollBarStyle,
   browser_extensions_enabled: bool,
   extension_path: Option<PathBuf>,
+  default_context_menus: bool,
 }
 
 #[cfg(windows)]
@@ -1232,6 +1536,7 @@ impl Default for PlatformSpecificWebViewAttributes {
     Self {
       additional_browser_args: None,
       browser_accelerator_keys: true, // This is WebView2's default behavior
+      default_context_menus: true,    // This is WebView2's default behavior
       theme: None,
       use_https: false, // To match macOS & Linux behavior in the context of mixed content.
       scroll_bar_style: ScrollBarStyle::default(),
@@ -1248,10 +1553,10 @@ pub trait WebViewBuilderExtWindows {
   /// ## Warning
   ///
   /// - Webview instances with different browser arguments must also have different [data directories](struct.WebContext.html#method.new).
-  /// - By default wry passes `--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection`
-  /// `--autoplay-policy=no-user-gesture-required` if autoplay is enabled
-  /// and `--proxy-server=<scheme>://<host>:<port>` if a proxy is set.
-  /// so if you use this method, you have to add these arguments yourself if you want to keep the same behavior.
+  /// - By default wry passes `--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --enable-features=RemoveRedirectionBitmap`
+  ///   `--autoplay-policy=no-user-gesture-required` if autoplay is enabled
+  ///   and `--proxy-server=<scheme>://<host>:<port>` if a proxy is set.
+  ///   so if you use this method, you have to add these arguments yourself if you want to keep the same behavior.
   fn with_additional_browser_args<S: Into<String>>(self, additional_args: S) -> Self;
 
   /// Determines whether browser-specific accelerator keys are enabled. When this setting is set to
@@ -1263,6 +1568,14 @@ pub trait WebViewBuilderExtWindows {
   ///
   /// <https://learn.microsoft.com/en-us/microsoft-edge/webview2/reference/winrt/microsoft_web_webview2_core/corewebview2settings#arebrowseracceleratorkeysenabled>
   fn with_browser_accelerator_keys(self, enabled: bool) -> Self;
+
+  /// Determines whether the webview's default context menus are enabled. When this setting is set to `false`,
+  /// it disables all context menus on the webview - menus on the window's native decorations for example are not affected.
+  ///
+  /// The default value is `true` (context menus are enabled).
+  ///
+  /// <https://learn.microsoft.com/en-us/microsoft-edge/webview2/reference/winrt/microsoft_web_webview2_core/corewebview2settings#aredefaultcontextmenusenabled>
+  fn with_default_context_menus(self, enabled: bool) -> Self;
 
   /// Specifies the theme of webview2. This affects things like `prefers-color-scheme`.
   ///
@@ -1300,7 +1613,7 @@ pub trait WebViewBuilderExtWindows {
   /// Set the path from which to load extensions from. Extensions stored in this path should be unpacked.
   ///
   /// Does nothing if browser extensions are disabled. See [`with_browser_extensions_enabled`](Self::with_browser_extensions_enabled)
-  fn with_extension_path(self, path: impl Into<PathBuf>) -> Self;
+  fn with_extensions_path(self, path: impl Into<PathBuf>) -> Self;
 }
 
 #[cfg(windows)]
@@ -1315,6 +1628,13 @@ impl WebViewBuilderExtWindows for WebViewBuilder<'_> {
   fn with_browser_accelerator_keys(self, enabled: bool) -> Self {
     self.and_then(|mut b| {
       b.platform_specific.browser_accelerator_keys = enabled;
+      Ok(b)
+    })
+  }
+
+  fn with_default_context_menus(self, enabled: bool) -> Self {
+    self.and_then(|mut b| {
+      b.platform_specific.default_context_menus = enabled;
       Ok(b)
     })
   }
@@ -1347,7 +1667,7 @@ impl WebViewBuilderExtWindows for WebViewBuilder<'_> {
     })
   }
 
-  fn with_extension_path(self, path: impl Into<PathBuf>) -> Self {
+  fn with_extensions_path(self, path: impl Into<PathBuf>) -> Self {
     self.and_then(|mut b| {
       b.platform_specific.extension_path = Some(path.into());
       Ok(b)
@@ -1467,7 +1787,7 @@ pub trait WebViewBuilderExtUnix<'a> {
     W: gtk::prelude::IsA<gtk::Container>;
 
   /// Set the path from which to load extensions from.
-  fn with_extension_path(self, path: impl Into<PathBuf>) -> Self;
+  fn with_extensions_path(self, path: impl Into<PathBuf>) -> Self;
 }
 
 #[cfg(any(
@@ -1488,7 +1808,7 @@ impl<'a> WebViewBuilderExtUnix<'a> for WebViewBuilder<'a> {
       .map(|webview| WebView { webview })
   }
 
-  fn with_extension_path(self, path: impl Into<PathBuf>) -> Self {
+  fn with_extensions_path(self, path: impl Into<PathBuf>) -> Self {
     self.and_then(|mut b| {
       b.platform_specific.extension_path = Some(path.into());
       Ok(b)
@@ -1535,9 +1855,9 @@ impl WebView {
   ///
   /// - **Windows**: This will create the webview as a child window of the `parent` window.
   /// - **macOS**: This will create the webview as a `NSView` subview of the `parent` window's
-  /// content view.
+  ///   content view.
   /// - **Linux**: This will create the webview as a child window of the `parent` window. Only X11
-  /// is supported. This method won't work on Wayland.
+  ///   is supported. This method won't work on Wayland.
   ///
   ///   Although this methods only needs an X11 window handle, you use webkit2gtk, so you still need to initialize gtk
   ///   by callling [`gtk::init`] and advance its loop alongside your event loop using [`gtk::main_iteration_do`].
@@ -1663,6 +1983,11 @@ impl WebView {
   /// Navigate to the specified url
   pub fn load_url(&self, url: &str) -> Result<()> {
     self.webview.load_url(url)
+  }
+
+  /// Reloads the current page.
+  pub fn reload(&self) -> crate::Result<()> {
+    self.webview.reload()
   }
 
   /// Navigate to the specified url using the specified headers
@@ -1857,6 +2182,38 @@ impl WebViewExtUnix for WebView {
   }
 }
 
+/// Additional methods on `WebView` that are specific to macOS or iOS.
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+pub trait WebViewExtDarwin {
+  /// Prints with extra options
+  fn print_with_options(&self, options: &PrintOptions) -> Result<()>;
+  /// Fetches all Data Store Identifiers of this application
+  ///
+  /// Needs to run on main thread and needs an event loop to run.
+  fn fetch_data_store_identifiers<F: FnOnce(Vec<[u8; 16]>) + Send + 'static>(cb: F) -> Result<()>;
+  /// Deletes a Data Store by an identifier.
+  ///
+  /// You must drop any WebView instances using the data store before you call this method.
+  ///
+  /// Needs to run on main thread and needs an event loop to run.
+  fn remove_data_store<F: FnOnce(Result<()>) + Send + 'static>(uuid: &[u8; 16], cb: F);
+}
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+impl WebViewExtDarwin for WebView {
+  fn print_with_options(&self, options: &PrintOptions) -> Result<()> {
+    self.webview.print_with_options(options)
+  }
+
+  fn fetch_data_store_identifiers<F: FnOnce(Vec<[u8; 16]>) + Send + 'static>(cb: F) -> Result<()> {
+    wkwebview::InnerWebView::fetch_data_store_identifiers(cb)
+  }
+
+  fn remove_data_store<F: FnOnce(Result<()>) + Send + 'static>(uuid: &[u8; 16], cb: F) {
+    wkwebview::InnerWebView::remove_data_store(uuid, cb)
+  }
+}
+
 /// Additional methods on `WebView` that are specific to macOS.
 #[cfg(target_os = "macos")]
 pub trait WebViewExtMacOS {
@@ -1868,8 +2225,14 @@ pub trait WebViewExtMacOS {
   fn ns_window(&self) -> Retained<NSWindow>;
   /// Attaches this webview to the given NSWindow and removes it from the current one.
   fn reparent(&self, window: *mut NSWindow) -> Result<()>;
-  // Prints with extra options
+  /// Prints with extra options
   fn print_with_options(&self, options: &PrintOptions) -> Result<()>;
+  /// Move the window controls to the specified position.
+  /// Normally this is handled by the Window but because `WebViewBuilder::build()` overwrites the window's NSView the controls will flicker on resizing.
+  /// Note: This method has no effects if the WebView is injected via `WebViewBuilder::build_as_child();` and there should be no flickers.
+  /// Warning: Do not use this if your chosen window library does not support traffic light insets.
+  /// Warning: Only use this in **decorated** windows with a **hidden titlebar**!
+  fn set_traffic_light_inset<P: Into<dpi::Position>>(&self, position: P) -> Result<()>;
 }
 
 #[cfg(target_os = "macos")]
@@ -1892,6 +2255,10 @@ impl WebViewExtMacOS for WebView {
 
   fn print_with_options(&self, options: &PrintOptions) -> Result<()> {
     self.webview.print_with_options(options)
+  }
+
+  fn set_traffic_light_inset<P: Into<dpi::Position>>(&self, position: P) -> Result<()> {
+    self.webview.set_traffic_light_inset(position.into())
   }
 }
 
@@ -1950,6 +2317,36 @@ pub enum PageLoadEvent {
   Started,
   /// Indicates that the page content has finished loading
   Finished,
+}
+
+/// Background throttling policy
+#[derive(Debug, Clone)]
+pub enum BackgroundThrottlingPolicy {
+  /// A policy where background throttling is disabled
+  Disabled,
+  /// A policy where a web view that's not in a window fully suspends tasks.
+  Suspend,
+  /// A policy where a web view that's not in a window limits processing, but does not fully suspend tasks.
+  Throttle,
+}
+
+/// An initialization script
+#[derive(Debug, Clone)]
+pub struct InitializationScript {
+  /// The script to run
+  pub script: String,
+  /// Whether the script should be injected to main frame only.
+  ///
+  /// When set to false, the script is also injected to subframes.
+  ///
+  /// ## Platform-specific
+  ///
+  /// - **Windows**: scripts are always injected into subframes regardless of this option.
+  ///   This will be the case until Webview2 implements a proper API to inject a script only on the main frame.
+  /// - **Android**: When [addDocumentStartJavaScript] is not supported, scripts are always injected into main frame only.
+  ///
+  /// [addDocumentStartJavaScript]: https://developer.android.com/reference/androidx/webkit/WebViewCompat#addDocumentStartJavaScript(android.webkit.WebView,java.lang.String,java.util.Set%3Cjava.lang.String%3E)
+  pub for_main_frame_only: bool,
 }
 
 #[cfg(test)]

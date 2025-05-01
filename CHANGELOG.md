@@ -1,5 +1,93 @@
 # Changelog
 
+## \[0.51.2]
+
+- [`f7781a7`](https://github.com/tauri-apps/wry/commit/f7781a788dbb0d07bea27f18daf844d70a3958a3) ([#1544](https://github.com/tauri-apps/wry/pull/1544) by [@lucasfernog](https://github.com/tauri-apps/wry/../../lucasfernog)) Allow modifying or removing the input accessory view on iOS via `WebViewBuilderExtIos::with_input_accessory_view_builder`.
+
+## \[0.51.1]
+
+- [`3e24d6b`](https://github.com/tauri-apps/wry/commit/3e24d6b7b191ce37298ad6be99614ccdf04c7d3f) ([#1543](https://github.com/tauri-apps/wry/pull/1543) by [@lucasfernog](https://github.com/tauri-apps/wry/../../lucasfernog)) Fix async custom protocol not responding.
+
+## \[0.51.0]
+
+- [`f99bbd9`](https://github.com/tauri-apps/wry/commit/f99bbd97c6f46492a2f8b34894532629ce17550d) ([#1507](https://github.com/tauri-apps/wry/pull/1507) by [@Simon-Laux](https://github.com/tauri-apps/wry/../../Simon-Laux)) Renamed `Error::UrlPrase` to `Error::UrlParse` to fix typo.
+- [`2d753c6`](https://github.com/tauri-apps/wry/commit/2d753c64822e05ed28621009ef9383ffb70b1b94) ([#1531](https://github.com/tauri-apps/wry/pull/1531) by [@Legend-Master](https://github.com/tauri-apps/wry/../../Legend-Master)) **Breaking Change**: `WebViewAttributes::initialization_scripts` takes `Vec::<InitializationScript>` now instead of `Vec::<(String, bool)>`
+- [`78b83a0`](https://github.com/tauri-apps/wry/commit/78b83a0d8a5db3c58140d7a3f00a52616049251e) ([#1537](https://github.com/tauri-apps/wry/pull/1537) by [@Brendonovich](https://github.com/tauri-apps/wry/../../Brendonovich)) Moved protocol handler functions to a thread local instead of storing them as ivars to prevent a race condition between webview close and custom protocol handling.
+- [`5f1e4ba`](https://github.com/tauri-apps/wry/commit/5f1e4bafeee6aab8cdc1d7ebc5d13bb6cfeb94ad) ([#1538](https://github.com/tauri-apps/wry/pull/1538) by [@syrel](https://github.com/tauri-apps/wry/../../syrel)) macOS: Handle flipped coordinates when adding a WebView as a child
+- [`4ec951a`](https://github.com/tauri-apps/wry/commit/4ec951a7b5d0484e19f2d94665c79380171ec9ba) ([#1526](https://github.com/tauri-apps/wry/pull/1526) by [@Legend-Master](https://github.com/tauri-apps/wry/../../Legend-Master)) Updated `webview2-com` to `0.37`, `windows` to `0.61`.
+- [`2d753c6`](https://github.com/tauri-apps/wry/commit/2d753c64822e05ed28621009ef9383ffb70b1b94) ([#1531](https://github.com/tauri-apps/wry/pull/1531) by [@Legend-Master](https://github.com/tauri-apps/wry/../../Legend-Master)) Init scripts are always executed on all frames on Windows WebView2
+- [`2d753c6`](https://github.com/tauri-apps/wry/commit/2d753c64822e05ed28621009ef9383ffb70b1b94) ([#1531](https://github.com/tauri-apps/wry/pull/1531) by [@Legend-Master](https://github.com/tauri-apps/wry/../../Legend-Master)) Fix init script sometimes get executed too late on Windows WebView2
+
+### feat
+
+- [`ecbced2`](https://github.com/tauri-apps/wry/commit/ecbced25e5e41c6a9f7816ea6517763d30c5b060) ([#1534](https://github.com/tauri-apps/wry/pull/1534) by [@Simon-Laux](https://github.com/tauri-apps/wry/../../Simon-Laux)) macOS/iOS: add option to disable link previews when building a webview (the webkit API has it enabled by default)
+
+  - `WebViewBuilderExtDarwin.with_allow_link_preview(bool)`
+
+## \[0.50.5]
+
+### enhance
+
+- [`353bd95`](https://github.com/tauri-apps/wry/commit/353bd9573a1ff80aa1e547e82f8c32ab2f984f9f) ([#1517](https://github.com/tauri-apps/wry/pull/1517) by [@FabianLars](https://github.com/tauri-apps/wry/../../FabianLars)) Added a Windows-only setting to disable all Webview2 context menus.
+
+### bug
+
+- [`4f4ade3`](https://github.com/tauri-apps/wry/commit/4f4ade3c9564bb33b6e54488c228a4c5b054204f) ([#1520](https://github.com/tauri-apps/wry/pull/1520) by [@lucasfernog](https://github.com/tauri-apps/wry/../../lucasfernog)) Fix crash setting macOS traffic light buttons inset when window is undecorated or buttons have been removed.
+
+## \[0.50.4]
+
+- [`349dfe3`](https://github.com/tauri-apps/wry/commit/349dfe37d25f71ed60143f7ec36153bedc296cfa) ([#1512](https://github.com/tauri-apps/wry/pull/1512) by [@Simon-Laux](https://github.com/tauri-apps/wry/../../Simon-Laux)) Added `WebViewExtDarwin` to expose WebView functions available to both macOS and iOS.
+- [`349dfe3`](https://github.com/tauri-apps/wry/commit/349dfe37d25f71ed60143f7ec36153bedc296cfa) ([#1512](https://github.com/tauri-apps/wry/pull/1512) by [@Simon-Laux](https://github.com/tauri-apps/wry/../../Simon-Laux)) fix: crash when using `WebViewBuilderExtDarwin.with_data_store_identifier`
+- [`349dfe3`](https://github.com/tauri-apps/wry/commit/349dfe37d25f71ed60143f7ec36153bedc296cfa) ([#1512](https://github.com/tauri-apps/wry/pull/1512) by [@Simon-Laux](https://github.com/tauri-apps/wry/../../Simon-Laux)) feat: macOS: add `WebViewExtDarwin::fetch_data_store_identifiers` and `WebViewExtDarwin::remove_data_store`.
+- [`d0b16a7`](https://github.com/tauri-apps/wry/commit/d0b16a7b89dfed084405bd7058020da1a4b6708a) ([#1491](https://github.com/tauri-apps/wry/pull/1491) by [@neilmcguire](https://github.com/tauri-apps/wry/../../neilmcguire)) On Windows, Add support for iframe requests in custom protocols. Requires WebView2 1.0.2365.46 or higher.
+- [`148d7cd`](https://github.com/tauri-apps/wry/commit/148d7cdd23de91aba541f935aa23d2faf5558199) ([#1513](https://github.com/tauri-apps/wry/pull/1513) by [@FabianLars](https://github.com/tauri-apps/wry/../../FabianLars)) Wry by default now passes `--enable-features=RemoveRedirectionBitmap` to WebView2 to hide the initial white flash of newly created webviews. Only takes effect on WebView2 Runtime versions 134 and above.
+
+## \[0.50.3]
+
+- [`94ecadb`](https://github.com/tauri-apps/wry/commit/94ecadbc73d6357484a4df7358c96e72111ce4be) ([#1496](https://github.com/tauri-apps/wry/pull/1496) by [@Simon-Laux](https://github.com/tauri-apps/wry/../../Simon-Laux)) Add `WebViewBuilder.with_javascript_disabled` api to disable JavaScript.
+- [`5120a5c`](https://github.com/tauri-apps/wry/commit/5120a5cc0fd4b9d1df32812d3df121c632821395) ([#1486](https://github.com/tauri-apps/wry/pull/1486) by [@charrondev](https://github.com/tauri-apps/wry/../../charrondev)) Fix `Webview::cookies` and `Webview::cookies_for_url` deadlock on macOS.
+- [`8dfeb76`](https://github.com/tauri-apps/wry/commit/8dfeb7650213fc10edbf7b03acc9a95107c7e342) ([#1500](https://github.com/tauri-apps/wry/pull/1500) by [@Simon-Laux](https://github.com/tauri-apps/wry/../../Simon-Laux)) feat: add `Webview.reload`
+
+## \[0.50.2]
+
+- [`cef818f`](https://github.com/tauri-apps/wry/commit/cef818f63f36b9acfc4d31f17b5e9fe7c3058612) ([#1505](https://github.com/tauri-apps/wry/pull/1505) by [@lucasfernog](https://github.com/tauri-apps/wry/../../lucasfernog)) Fix `already mutably borrowed: BorrowError` panic on webview initialization on Android.
+
+## \[0.50.1]
+
+- [`f9abf6b`](https://github.com/tauri-apps/wry/commit/f9abf6b4464acc91926236366a347f04d741b15d) ([#1501](https://github.com/tauri-apps/wry/pull/1501) by [@Legend-Master](https://github.com/tauri-apps/wry/../../Legend-Master)) Fix webview not resized with parent when it gets maximized on Windows
+
+## \[0.50.0]
+
+- [`933de78`](https://github.com/tauri-apps/wry/commit/933de788bc0fbab1914b7c5ce29c209281996b03) ([#1492](https://github.com/tauri-apps/wry/pull/1492) by [@Legend-Master](https://github.com/tauri-apps/wry/../../Legend-Master)) Updated `webview2-com` to `0.36`, `windows` to `0.60`.
+
+## \[0.49.0]
+
+- [`0395df5`](https://github.com/tauri-apps/wry/commit/0395df504ffaea2320d706501c89859a6e319d30) ([#1484](https://github.com/tauri-apps/wry/pull/1484) by [@alexmoon](https://github.com/tauri-apps/wry/../../alexmoon)) Removed `obj-exception` feature.
+- [`c27b4ff`](https://github.com/tauri-apps/wry/commit/c27b4ffc05b6bc9bb3748a1203116342cfec680d) ([#1468](https://github.com/tauri-apps/wry/pull/1468) by [@madsmtm](https://github.com/tauri-apps/wry/../../madsmtm)) Update to `objc2` v0.6.
+
+  This bumps MSRV on macOS/iOS to 1.71.
+- [`95a9319`](https://github.com/tauri-apps/wry/commit/95a9319f24cb62add69d468ec0f60530b608fe6b) ([#1454](https://github.com/tauri-apps/wry/pull/1454) by [@Legend-Master](https://github.com/tauri-apps/wry/../../Legend-Master)) Updated `webview2-com` to `0.35`, `windows` to `0.59`.
+- [`9df094a`](https://github.com/tauri-apps/wry/commit/9df094aa79210c6743b5d295069931afaee596db) ([#1483](https://github.com/tauri-apps/wry/pull/1483) by [@amrbashir](https://github.com/tauri-apps/wry/../../amrbashir)) On Windows, fix webview slightly larger than the host window causing a pixel or two to be obscured.
+- [`ce98c34`](https://github.com/tauri-apps/wry/commit/ce98c3401d6bc3079900ced9007f212f4f30099c) ([#1480](https://github.com/tauri-apps/wry/pull/1480) by [@ahqsoftwares](https://github.com/tauri-apps/wry/../../ahqsoftwares)) Fixed an issue that could cause `Return type mismatch: expected 'kotlin.String', actual 'kotlin.String?'` errors.
+
+### enhance
+
+- [`0185644`](https://github.com/tauri-apps/wry/commit/0185644040184c43084814cb8692acb4e1004d86) ([#1452](https://github.com/tauri-apps/wry/pull/1452) by [@mzdk100](https://github.com/tauri-apps/wry/../../mzdk100)) Allow the use of TAB to cycle through focus elements in an HTML document.
+
+## \[0.48.1]
+
+- [`cbbcccc`](https://github.com/tauri-apps/wry/commit/cbbcccc38af7d900a0f8f7fa5ea5e6667765ed81) ([#1446](https://github.com/tauri-apps/wry/pull/1446) by [@FabianLars](https://github.com/tauri-apps/wry/../../FabianLars)) Add functionality to set the traffic light inset on macOS. This is required to prevent flickers if the WebView is injected via `build()` instead of `build_as_child()`.
+
+### enhance
+
+- [`26abf63`](https://github.com/tauri-apps/wry/commit/26abf63d79c4a0fcff8ea39d0ff677686f5b546c) ([#1445](https://github.com/tauri-apps/wry/pull/1445) by [@bastiankistner](https://github.com/tauri-apps/wry/../../bastiankistner)) Add an option to change the default background throttling policy (currently for WebKit only).
+
+## \[0.48.0]
+
+- [`eb0c816`](https://github.com/tauri-apps/wry/commit/eb0c8163f1e2a11115ef1928b5e4bf0a8f083f3b) ([#1423](https://github.com/tauri-apps/wry/pull/1423) by [@SpikeHD](https://github.com/tauri-apps/wry/../../SpikeHD)) Rename `{WebViewBuilderExtWindows, WebViewBuilderExtUnix}::with_extension_path` to `with_extensions_path`.
+- [`b4ba5b4`](https://github.com/tauri-apps/wry/commit/b4ba5b47f235df503085150671ff16189d3d9ea9) ([#1426](https://github.com/tauri-apps/wry/pull/1426) by [@FabianLars](https://github.com/tauri-apps/wry/../../FabianLars)) On Windows, Wry will now log PostMessage errors instead of panicking.
+- [`f0c6b94`](https://github.com/tauri-apps/wry/commit/f0c6b947dddc8f1b208157a664a6cc940f123b3c) ([#1441](https://github.com/tauri-apps/wry/pull/1441) by [@renovate](https://github.com/tauri-apps/wry/../../renovate)) Updated `webview2-com` to `0.34`.
+
 ## \[0.47.2]
 
 - [`7bb4f49`](https://github.com/tauri-apps/wry/commit/7bb4f4929eddbde8f36472a55ec3713d6d51c0e3) ([#1421](https://github.com/tauri-apps/wry/pull/1421) by [@SpikeHD](https://github.com/tauri-apps/wry/../../SpikeHD)) Fix extension loading on Windows.

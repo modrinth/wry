@@ -16,9 +16,9 @@ use std::{
 };
 
 use windows::{
-  core::implement,
+  core::{implement, BOOL},
   Win32::{
-    Foundation::{BOOL, DRAGDROP_E_INVALIDHWND, HWND, LPARAM, POINT, POINTL},
+    Foundation::{DRAGDROP_E_INVALIDHWND, HWND, LPARAM, POINT, POINTL},
     Graphics::Gdi::ScreenToClient,
     System::{
       Com::{IDataObject, DVASPECT_CONTENT, FORMATETC, TYMED_HGLOBAL},
@@ -57,7 +57,7 @@ impl DragDropController {
         let closure = &mut *(lparam.0 as *mut c_void as *mut &mut dyn FnMut(HWND) -> bool);
         closure(hwnd).into()
       }
-      let _ = unsafe { EnumChildWindows(hwnd, Some(enumerate_callback), lparam) };
+      let _ = unsafe { EnumChildWindows(Some(hwnd), Some(enumerate_callback), lparam) };
     }
 
     controller
@@ -94,7 +94,10 @@ impl DragDropTarget {
     }
   }
 
-  unsafe fn iterate_filenames<F>(data_obj: Option<&IDataObject>, mut callback: F) -> Option<HDROP>
+  unsafe fn iterate_filenames<F>(
+    data_obj: windows_core::Ref<'_, IDataObject>,
+    mut callback: F,
+  ) -> Option<HDROP>
   where
     F: FnMut(PathBuf),
   {
@@ -126,7 +129,7 @@ impl DragDropTarget {
 
           // Fill path_buf with the null-terminated file name
           let mut path_buf = Vec::with_capacity(str_len);
-          DragQueryFileW(hdrop, i, std::mem::transmute(path_buf.spare_capacity_mut()));
+          DragQueryFileW(hdrop, i, Some(&mut path_buf));
           path_buf.set_len(str_len);
 
           callback(OsString::from_wide(&path_buf[0..character_count]).into());
@@ -157,7 +160,7 @@ impl DragDropTarget {
 impl IDropTarget_Impl for DragDropTarget_Impl {
   fn DragEnter(
     &self,
-    pDataObj: Option<&IDataObject>,
+    pDataObj: windows_core::Ref<'_, IDataObject>,
     _grfKeyState: MODIFIERKEYS_FLAGS,
     pt: &POINTL,
     pdwEffect: *mut DROPEFFECT,
@@ -224,7 +227,7 @@ impl IDropTarget_Impl for DragDropTarget_Impl {
 
   fn Drop(
     &self,
-    pDataObj: Option<&IDataObject>,
+    pDataObj: windows_core::Ref<'_, IDataObject>,
     _grfKeyState: MODIFIERKEYS_FLAGS,
     pt: &POINTL,
     _pdwEffect: *mut DROPEFFECT,

@@ -35,14 +35,15 @@ use objc2::runtime::Bool;
 use objc2::{
   rc::Retained,
   runtime::{AnyObject, NSObject, ProtocolObject},
-  ClassType, DeclaredClass,
+  AllocAnyThread, DeclaredClass, MainThreadOnly, Message,
 };
 #[cfg(target_os = "macos")]
 use objc2_app_kit::{NSApplication, NSAutoresizingMaskOptions, NSTitlebarSeparatorStyle, NSView};
 #[cfg(target_os = "macos")]
-use objc2_foundation::CGSize;
+use objc2_core_foundation::CGSize;
+use objc2_core_foundation::{CGPoint, CGRect};
 use objc2_foundation::{
-  ns_string, CGPoint, CGRect, MainThreadMarker, NSArray, NSBundle, NSDate, NSError, NSHTTPCookie,
+  ns_string, MainThreadMarker, NSArray, NSBundle, NSDate, NSError, NSHTTPCookie,
   NSHTTPCookieSameSiteLax, NSHTTPCookieSameSiteStrict, NSJSONSerialization, NSMutableURLRequest,
   NSNumber, NSObjectNSKeyValueCoding, NSObjectProtocol, NSString, NSUTF8StringEncoding, NSURL,
   NSUUID,
@@ -54,6 +55,7 @@ use objc2_ui_kit::{UIScrollView, UIViewAutoresizing};
 use objc2_app_kit::NSWindow;
 #[cfg(target_os = "ios")]
 use objc2_ui_kit::UIView as NSView;
+use once_cell::sync::Lazy;
 // #[cfg(target_os = "ios")]
 // use objc2_ui_kit::UIWindow as NSWindow;
 
@@ -63,21 +65,23 @@ use crate::wkwebview::ios::WKWebView::WKWebView;
 use objc2_web_kit::WKWebView;
 
 use objc2_web_kit::{
-  WKAudiovisualMediaTypes, WKURLSchemeHandler, WKUserContentController, WKUserScript,
-  WKUserScriptInjectionTime, WKWebViewConfiguration, WKWebsiteDataStore,
+  WKAudiovisualMediaTypes, WKInactiveSchedulingPolicy, WKURLSchemeHandler, WKUserContentController,
+  WKUserScript, WKUserScriptInjectionTime, WKWebViewConfiguration, WKWebsiteDataStore,
 };
-use once_cell::sync::Lazy;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
 use std::{
-  collections::{HashMap, HashSet},
-  ffi::{c_void, CString},
+  cell::RefCell,
+  collections::HashMap,
+  ffi::{CStr, CString},
   net::Ipv4Addr,
   os::raw::c_char,
   panic::AssertUnwindSafe,
-  ptr::{null_mut, NonNull},
+  ptr::NonNull,
+  rc::Rc,
   str::{self, FromStr},
-  sync::{Arc, Mutex},
+  sync::{Arc, Mutex, RwLock},
+  time::Duration,
 };
 
 #[cfg(feature = "mac-proxy")]
@@ -88,14 +92,24 @@ use crate::{
   },
 };
 
-use crate::{Error, Rect, RequestAsyncResponder, Result, WebViewAttributes, RGBA};
+use crate::{
+  BackgroundThrottlingPolicy, Error, Rect, RequestAsyncResponder, Result, WebViewAttributes, RGBA,
+};
 
 use http::Request;
 
 use crate::util::Counter;
 
 static COUNTER: Counter = Counter::new();
-static WEBVIEW_IDS: Lazy<Mutex<HashSet<String>>> = Lazy::new(Default::default);
+
+static WEBVIEW_STATE: Lazy<RwLock<HashMap<String, WebViewState>>> = Lazy::new(Default::default);
+
+struct WebViewState {
+  pub protocol_ptrs: Vec<Rc<dyn Fn(crate::WebViewId, Request<Vec<u8>>, RequestAsyncResponder)>>,
+}
+
+unsafe impl Send for WebViewState {}
+unsafe impl Sync for WebViewState {}
 
 #[derive(Debug, Default, Copy, Clone)]
 pub struct PrintMargin {
@@ -112,6 +126,7 @@ pub struct PrintOptions {
 
 pub(crate) struct InnerWebView {
   id: String,
+  mtm: MainThreadMarker,
   pub webview: Retained<WryWebView>,
   pub manager: Retained<WKUserContentController>,
   data_store: Retained<WKWebsiteDataStore>,
@@ -134,7 +149,9 @@ pub(crate) struct InnerWebView {
   #[allow(dead_code)]
   // We need this the keep the reference count
   ui_delegate: Retained<WryWebViewUIDelegate>,
-  protocol_ptrs: Vec<*mut Box<dyn Fn(crate::WebViewId, Request<Vec<u8>>, RequestAsyncResponder)>>,
+  #[cfg(target_os = "macos")]
+  // We need this to update the traffic light inset
+  parent_view: Option<Retained<WryWebViewParent>>,
 }
 
 impl InnerWebView {
@@ -183,34 +200,30 @@ impl InnerWebView {
       .map(|id| id.to_string())
       .unwrap_or_else(|| COUNTER.next().to_string());
 
-    let mut wv_ids = WEBVIEW_IDS.lock().unwrap();
-    wv_ids.insert(webview_id.clone());
-    drop(wv_ids);
-
     // Safety: objc runtime calls are unsafe
     unsafe {
-      let config = WKWebViewConfiguration::new();
+      let config = WKWebViewConfiguration::new(mtm);
 
       // Incognito mode
-      let os_version = util::operating_system_version();
+      let (os_major_version, _, _) = util::operating_system_version();
       #[cfg(target_os = "macos")]
-      let custom_data_store_available = os_version.0 >= 14;
+      let custom_data_store_available = os_major_version >= 14;
       #[cfg(target_os = "ios")]
-      let custom_data_store_available = os_version.0 >= 17;
+      let custom_data_store_available = os_major_version >= 17;
 
       let data_store = match (
         attributes.incognito,
         custom_data_store_available,
         pl_attrs.data_store_identifier,
       ) {
-        (true, _, _) => WKWebsiteDataStore::nonPersistentDataStore(),
+        (true, _, _) => WKWebsiteDataStore::nonPersistentDataStore(mtm),
         // if data_store_identifier is given and custom data stores are available, use custom store
         (false, true, Some(data_store)) => {
           let identifier = NSUUID::from_bytes(data_store);
-          WKWebsiteDataStore::dataStoreForIdentifier(&identifier)
+          WKWebsiteDataStore::dataStoreForIdentifier(&identifier, mtm)
         }
         // default data store
-        _ => WKWebsiteDataStore::defaultDataStore(),
+        _ => WKWebsiteDataStore::defaultDataStore(mtm),
       };
 
       // Register Custom Protocols
@@ -218,14 +231,17 @@ impl InnerWebView {
       for (name, function) in attributes.custom_protocols {
         let url_scheme_handler_cls = url_scheme_handler::create(&name);
         let handler: *mut AnyObject = objc2::msg_send![url_scheme_handler_cls, new];
-        let function = Box::into_raw(Box::new(function));
-        protocol_ptrs.push(function);
+        let protocol_index = protocol_ptrs.len();
+        protocol_ptrs.push(Rc::from(function));
 
-        let ivar = (*handler).class().instance_variable("function").unwrap();
-        let ivar_delegate = ivar.load_mut(&mut *handler);
-        *ivar_delegate = function as *mut _ as *mut c_void;
+        let ivar = (*handler)
+          .class()
+          .instance_variable(CStr::from_bytes_with_nul(b"protocol_index\0").unwrap())
+          .unwrap();
+        let ivar_delegate: &mut usize = ivar.load_mut(&mut *handler);
+        *ivar_delegate = protocol_index;
 
-        let ivar = (*handler).class().instance_variable("webview_id").unwrap();
+        let ivar = (*handler).class().instance_variable(c"webview_id").unwrap();
         let ivar_delegate: &mut *mut c_char = ivar.load_mut(&mut *handler);
         *ivar_delegate = CString::new(webview_id.as_bytes()).unwrap().into_raw();
 
@@ -240,9 +256,14 @@ impl InnerWebView {
         }
       }
 
+      WEBVIEW_STATE
+        .write()
+        .unwrap()
+        .insert(webview_id.clone(), WebViewState { protocol_ptrs });
+
       // WebView and manager
       let manager = config.userContentController();
-      let webview = mtm.alloc::<WryWebView>().set_ivars(WryWebViewIvars {
+      let webview = WryWebView::alloc(mtm).set_ivars(WryWebViewIvars {
         is_child,
         #[cfg(target_os = "macos")]
         drag_drop_handler: match attributes.drag_drop_handler {
@@ -251,7 +272,9 @@ impl InnerWebView {
         },
         #[cfg(target_os = "macos")]
         accept_first_mouse: Bool::new(attributes.accept_first_mouse),
-        custom_protocol_task_ids: HashMap::new(),
+        #[cfg(target_os = "ios")]
+        input_accessory_view_builder: pl_attrs.input_accessory_view_builder,
+        custom_protocol_task_ids: Default::default(),
       });
 
       config.setWebsiteDataStore(&data_store);
@@ -263,7 +286,7 @@ impl InnerWebView {
         let proxy_config = match proxy_config {
           ProxyConfig::Http(endpoint) => {
             let nw_endpoint = nw_endpoint_t::try_from(endpoint).unwrap();
-            nw_proxy_config_create_http_connect(nw_endpoint, null_mut())
+            nw_proxy_config_create_http_connect(nw_endpoint, std::ptr::null_mut())
           }
           ProxyConfig::Socks5(endpoint) => {
             let nw_endpoint = nw_endpoint_t::try_from(endpoint).unwrap();
@@ -280,13 +303,16 @@ impl InnerWebView {
         ns_string!("allowsPictureInPictureMediaPlayback"),
       );
 
+      if attributes.javascript_disabled {
+        let web_page_preferences = config.defaultWebpagePreferences();
+        web_page_preferences.setAllowsContentJavaScript(false);
+      }
+
       #[cfg(target_os = "ios")]
       config.setValue_forKey(Some(&_yes), ns_string!("allowsInlineMediaPlayback"));
 
       if attributes.autoplay {
-        config.setMediaTypesRequiringUserActionForPlayback(
-          WKAudiovisualMediaTypes::WKAudiovisualMediaTypeNone,
-        );
+        config.setMediaTypesRequiringUserActionForPlayback(WKAudiovisualMediaTypes::None);
       }
 
       #[cfg(feature = "transparent")]
@@ -336,27 +362,53 @@ impl InnerWebView {
           size: CGSize::new(w as f64, h as f64),
         };
         let webview: Retained<WryWebView> =
-          objc2::msg_send_id![super(webview), initWithFrame:frame configuration:&**config];
+          objc2::msg_send![super(webview), initWithFrame: frame, configuration: &**config];
         webview
       };
       #[cfg(target_os = "ios")]
       let webview = {
         let frame = ns_view.frame();
         let webview: Retained<WryWebView> =
-          objc2::msg_send_id![super(webview), initWithFrame:frame configuration:&**config];
+          objc2::msg_send![super(webview), initWithFrame: frame, configuration: &**config];
         webview
       };
+
+      // change background throttling policy if attributes.background_throttling is set
+      // which works for iOS 17.0+,iPadOS 17.0+,Mac Catalyst 17.0+, macOS 14.0+, visionOS 1.0+
+      #[cfg(any(target_os = "ios", target_os = "macos"))]
+      {
+        let is_supported_os = (cfg!(target_os = "ios") && os_major_version >= 17)
+          || (cfg!(target_os = "macos") && os_major_version >= 14);
+
+        if is_supported_os {
+          if let Some(policy) = attributes.background_throttling {
+            let policy_value = match policy {
+              BackgroundThrottlingPolicy::Disabled => WKInactiveSchedulingPolicy::None.0,
+              BackgroundThrottlingPolicy::Suspend => WKInactiveSchedulingPolicy::Suspend.0,
+              BackgroundThrottlingPolicy::Throttle => WKInactiveSchedulingPolicy::Throttle.0,
+            };
+
+            // Convert and set the value
+            if let Ok(policy_number) = policy_value.try_into() {
+              _preference.setValue_forKey(
+                Some(&NSNumber::numberWithInt(policy_number)),
+                ns_string!("inactiveSchedulingPolicy"),
+              );
+            }
+          }
+        }
+      }
 
       #[cfg(target_os = "macos")]
       {
         if is_child {
           // fixed element
-          webview.setAutoresizingMask(NSAutoresizingMaskOptions::NSViewMinYMargin);
+          webview.setAutoresizingMask(NSAutoresizingMaskOptions::ViewMinYMargin);
         } else {
           // Auto-resize
           webview.setAutoresizingMask(
-            NSAutoresizingMaskOptions::NSViewHeightSizable
-              | NSAutoresizingMaskOptions::NSViewWidthSizable,
+            NSAutoresizingMaskOptions::ViewHeightSizable
+              | NSAutoresizingMaskOptions::ViewWidthSizable,
           );
         }
 
@@ -375,7 +427,7 @@ impl InnerWebView {
         // disable scroll bounce by default
         // https://developer.apple.com/documentation/webkit/wkwebview/1614784-scrollview?language=objc
         // But not exist in objc2-web-kit
-        let scroll_view: Retained<UIScrollView> = objc2::msg_send_id![&webview, scrollView];
+        let scroll_view: Retained<UIScrollView> = objc2::msg_send![&webview, scrollView];
         // let scroll_view: Retained<UIScrollView> = webview.ivars().scrollView; // FIXME: not test yet
         scroll_view.setBounces(false)
       }
@@ -440,12 +492,11 @@ impl InnerWebView {
         mtm,
       );
 
-      let proto_navigation_policy_delegate =
-        ProtocolObject::from_ref(navigation_policy_delegate.as_ref());
+      let proto_navigation_policy_delegate = ProtocolObject::from_ref(&*navigation_policy_delegate);
       webview.setNavigationDelegate(Some(proto_navigation_policy_delegate));
 
       let ui_delegate: Retained<WryWebViewUIDelegate> = WryWebViewUIDelegate::new(mtm);
-      let proto_ui_delegate = ProtocolObject::from_ref(ui_delegate.as_ref());
+      let proto_ui_delegate = ProtocolObject::from_ref(&*ui_delegate);
       webview.setUIDelegate(Some(proto_ui_delegate));
 
       // ns window is required for the print operation
@@ -459,8 +510,10 @@ impl InnerWebView {
         }
       }
 
-      let w = Self {
+      #[cfg_attr(target_os = "ios", allow(unused_mut))]
+      let mut w = Self {
         id: webview_id,
+        mtm,
         webview: webview.clone(),
         manager: manager.clone(),
         ns_view: ns_view.retain(),
@@ -471,8 +524,9 @@ impl InnerWebView {
         navigation_policy_delegate,
         download_delegate,
         ui_delegate,
-        protocol_ptrs,
         is_child,
+        #[cfg(target_os = "macos")]
+        parent_view: None,
       };
 
       // Initialize scripts
@@ -482,8 +536,8 @@ r#"Object.defineProperty(window, 'ipc', {
 });"#,
       true
       );
-      for (js, for_main_only) in attributes.initialization_scripts {
-        w.init(&js, for_main_only);
+      for init_script in attributes.initialization_scripts {
+        w.init(&init_script.script, init_script.for_main_frame_only);
       }
 
       // Set user agent
@@ -498,30 +552,41 @@ r#"Object.defineProperty(window, 'ipc', {
         w.navigate_to_string(&html);
       }
 
+      // Allow Link Preview
+      w.webview.setAllowsLinkPreview(pl_attrs.allow_link_preview);
+
       // Inject the web view into the window as main content
       #[cfg(target_os = "macos")]
       {
         if is_child {
           ns_view.addSubview(&webview);
         } else {
+          // inject the webview into the window
+          let ns_window = ns_view.window().unwrap();
+
           let parent_view = WryWebViewParent::new(mtm);
+
+          if let Some(position) = pl_attrs.traffic_light_inset {
+            parent_view.set_traffic_light_inset(&ns_window, position);
+          }
+
           parent_view.setAutoresizingMask(
-            NSAutoresizingMaskOptions::NSViewHeightSizable
-              | NSAutoresizingMaskOptions::NSViewWidthSizable,
+            NSAutoresizingMaskOptions::ViewHeightSizable
+              | NSAutoresizingMaskOptions::ViewWidthSizable,
           );
           parent_view.addSubview(&webview.clone());
 
-          // inject the webview into the window
-          let ns_window = ns_view.window().unwrap();
           // Tell the webview receive keyboard events in the window.
           // See https://github.com/tauri-apps/wry/issues/739
           ns_window.setContentView(Some(&parent_view));
           ns_window.makeFirstResponder(Some(&webview));
+
+          w.parent_view = Some(parent_view);
         }
 
         // make sure the window is always on top when we create a new webview
         let app = NSApplication::sharedApplication(mtm);
-        if os_version.0 >= 14 {
+        if os_major_version >= 14 {
           NSApplication::activate(&app);
         } else {
           #[allow(deprecated)]
@@ -566,7 +631,7 @@ r#"Object.defineProperty(window, 'ipc', {
             if !val.is_null() {
               let json_ns_data = NSJSONSerialization::dataWithJSONObject_options_error(
                 &*val,
-                objc2_foundation::NSJSONWritingOptions::NSJSONWritingFragmentsAllowed,
+                objc2_foundation::NSJSONWritingOptions::FragmentsAllowed,
               )
               .unwrap();
               let json_string = NSString::alloc();
@@ -606,7 +671,7 @@ r#"Object.defineProperty(window, 'ipc', {
   fn init(&self, js: &str, for_main_only: bool) {
     // Safety: objc runtime calls are unsafe
     unsafe {
-      let userscript = WKUserScript::alloc();
+      let userscript = WKUserScript::alloc(self.mtm);
       let script = WKUserScript::initWithSource_injectionTime_forMainFrameOnly(
         userscript,
         &NSString::from_str(js),
@@ -630,11 +695,18 @@ r#"Object.defineProperty(window, 'ipc', {
     Ok(())
   }
 
+  /// Reloads the current page.
+  pub fn reload(&self) -> crate::Result<()> {
+    // Safety: objc runtime calls are unsafe
+    unsafe { self.webview.reload() };
+    Ok(())
+  }
+
   pub fn clear_all_browsing_data(&self) -> Result<()> {
     unsafe {
       let config = self.webview.configuration();
       let store = config.websiteDataStore();
-      let all_data_types = WKWebsiteDataStore::allWebsiteDataTypes();
+      let all_data_types = WKWebsiteDataStore::allWebsiteDataTypes(self.mtm);
       let date = NSDate::dateWithTimeIntervalSince1970(0.0);
       let handler = block2::RcBlock::new(|| {});
       store.removeDataOfTypes_modifiedSince_completionHandler(&all_data_types, &date, &handler);
@@ -646,7 +718,7 @@ r#"Object.defineProperty(window, 'ipc', {
     // Safety: objc runtime calls are unsafe
     unsafe {
       let url = NSURL::URLWithString(&NSString::from_str(url)).unwrap();
-      let mut request = NSMutableURLRequest::requestWithURL(&url);
+      let request = NSMutableURLRequest::requestWithURL(&url);
       if let Some(headers) = headers {
         for (name, value) in headers.iter() {
           let key = NSString::from_str(name.as_str());
@@ -709,7 +781,7 @@ r#"Object.defineProperty(window, 'ipc', {
           &window,
           None,
           None,
-          null_mut(),
+          std::ptr::null_mut(),
         )
       }
     }
@@ -722,7 +794,7 @@ r#"Object.defineProperty(window, 'ipc', {
     #[cfg(target_os = "macos")]
     unsafe {
       // taken from <https://github.com/WebKit/WebKit/blob/784f93cb80a386c29186c510bba910b67ce3adc1/Source/WebKit/UIProcess/API/Cocoa/WKWebView.mm#L1939>
-      let tool: Retained<AnyObject> = objc2::msg_send_id![&self.webview, _inspector];
+      let tool: Retained<AnyObject> = objc2::msg_send![&self.webview, _inspector];
       let () = objc2::msg_send![&tool, show];
     }
   }
@@ -732,7 +804,7 @@ r#"Object.defineProperty(window, 'ipc', {
     #[cfg(target_os = "macos")]
     unsafe {
       // taken from <https://github.com/WebKit/WebKit/blob/784f93cb80a386c29186c510bba910b67ce3adc1/Source/WebKit/UIProcess/API/Cocoa/WKWebView.mm#L1939>
-      let tool: Retained<AnyObject> = objc2::msg_send_id![&self.webview, _inspector];
+      let tool: Retained<AnyObject> = objc2::msg_send![&self.webview, _inspector];
       let () = objc2::msg_send![&tool, close];
     }
   }
@@ -742,7 +814,7 @@ r#"Object.defineProperty(window, 'ipc', {
     #[cfg(target_os = "macos")]
     unsafe {
       // taken from <https://github.com/WebKit/WebKit/blob/784f93cb80a386c29186c510bba910b67ce3adc1/Source/WebKit/UIProcess/API/Cocoa/WKWebView.mm#L1939>
-      let tool: Retained<AnyObject> = objc2::msg_send_id![&self.webview, _inspector];
+      let tool: Retained<AnyObject> = objc2::msg_send![&self.webview, _inspector];
       let is_visible: bool = objc2::msg_send![&tool, isVisible];
       is_visible
     }
@@ -848,8 +920,8 @@ r#"Object.defineProperty(window, 'ipc', {
 
     let same_site = cookie.sameSitePolicy();
     let same_site = match same_site {
-      Some(policy) if policy.as_ref() == NSHTTPCookieSameSiteLax => cookie::SameSite::Lax,
-      Some(policy) if policy.as_ref() == NSHTTPCookieSameSiteStrict => cookie::SameSite::Strict,
+      Some(policy) if &*policy == NSHTTPCookieSameSiteLax => cookie::SameSite::Lax,
+      Some(policy) if &*policy == NSHTTPCookieSameSiteStrict => cookie::SameSite::Strict,
       _ => cookie::SameSite::None,
     };
     cookie_builder = cookie_builder.same_site(same_site);
@@ -884,7 +956,7 @@ r#"Object.defineProperty(window, 'ipc', {
             (secure && url.scheme() == "https") ||
             // or cookie is secure and is localhost
             (
-              secure && url.scheme() == "http" && 
+              secure && url.scheme() == "http" &&
               (url.domain() == Some("localhost") || url.domain().and_then(|d| Ipv4Addr::from_str(d).ok()).map(|ip| ip.is_loopback()).unwrap_or(false))
             ) ||
             // or cookie is not secure
@@ -907,7 +979,7 @@ r#"Object.defineProperty(window, 'ipc', {
             let cookies = cookies
               .to_vec()
               .into_iter()
-              .map(|cookie| Self::cookie_from_wkwebview(cookie))
+              .map(|cookie| Self::cookie_from_wkwebview(&cookie))
               .collect();
             let _ = tx.send(cookies);
           },
@@ -925,6 +997,70 @@ r#"Object.defineProperty(window, 'ipc', {
     }
 
     Ok(())
+  }
+
+  #[cfg(target_os = "macos")]
+  pub(crate) fn set_traffic_light_inset(&self, position: dpi::Position) -> crate::Result<()> {
+    if let Some(parent_view) = &self.parent_view {
+      parent_view.set_traffic_light_inset(&self.webview.window().unwrap(), position);
+    }
+
+    Ok(())
+  }
+
+  /// Fetches all Data Store Identifiers of this application
+  ///
+  /// Needs to run on main thread and needs an event loop to run.
+  pub fn fetch_data_store_identifiers<F: FnOnce(Vec<[u8; 16]>) + Send + 'static>(
+    cb: F,
+  ) -> crate::Result<()> {
+    // make the RcBlock callback be a FnOnce
+    let cb = RefCell::new(Some(cb));
+    let block = block2::RcBlock::new(move |stores: NonNull<NSArray<NSUUID>>| {
+      let uuid_list = unsafe { stores.as_ref() }
+        .to_vec()
+        .iter()
+        .map(|uuid| uuid.as_bytes())
+        .collect();
+      if let Some(cb) = cb.take() {
+        cb(uuid_list);
+      }
+    });
+
+    match MainThreadMarker::new() {
+      Some(mtn) => unsafe {
+        WKWebsiteDataStore::fetchAllDataStoreIdentifiers(&block, mtn);
+        Ok(())
+      },
+      None => Err(Error::NotMainThread),
+    }
+  }
+
+  /// Deletes a Data Store by an identifier
+  ///
+  /// Needs to run on main thread and needs an event loop to run.
+  pub fn remove_data_store<F: FnOnce(crate::Result<()>) + Send + 'static>(uuid: &[u8; 16], cb: F) {
+    let Some(mtm) = MainThreadMarker::new() else {
+      cb(Err(Error::NotMainThread));
+      return;
+    };
+    let identifier = NSUUID::from_bytes(uuid.to_owned());
+
+    // make the RcBlock callback be a FnOnce
+    let cb = RefCell::new(Some(cb));
+    let block = block2::RcBlock::new(move |error: *mut NSError| {
+      if error.is_null() {
+        if let Some(cb) = cb.take() {
+          cb(Ok(()));
+        }
+      } else if let Some(cb) = cb.take() {
+        cb(Err(Error::DataStoreInUse));
+      }
+    });
+
+    unsafe {
+      WKWebsiteDataStore::removeDataStoreForIdentifier_completionHandler(&identifier, &block, mtm);
+    }
   }
 }
 
@@ -953,7 +1089,7 @@ pub fn platform_webview_version() -> Result<String> {
     let webkit_version = dict
       .objectForKey(&NSString::from_str("CFBundleVersion"))
       .unwrap();
-    let webkit_version = Retained::cast::<NSString>(webkit_version);
+    let webkit_version = webkit_version.downcast::<NSString>().unwrap();
 
     bundle.unload();
     Ok(webkit_version.to_string())
@@ -962,7 +1098,7 @@ pub fn platform_webview_version() -> Result<String> {
 
 impl Drop for InnerWebView {
   fn drop(&mut self) {
-    WEBVIEW_IDS.lock().unwrap().remove(&self.id);
+    WEBVIEW_STATE.write().unwrap().remove(&self.id);
 
     // We need to drop handler closures here
     unsafe {
@@ -975,12 +1111,6 @@ impl Drop for InnerWebView {
           .removeScriptMessageHandlerForName(&ipc);
       }
 
-      for ptr in self.protocol_ptrs.iter() {
-        if !ptr.is_null() {
-          drop(Box::from_raw(*ptr));
-        }
-      }
-
       // Remove webview from window's NSView before dropping.
       self.webview.removeFromSuperview();
       self.webview.retain();
@@ -991,31 +1121,55 @@ impl Drop for InnerWebView {
 
 /// Converts from wry screen-coordinates to macOS screen-coordinates.
 /// wry: top-left is (0, 0) and y increasing downwards
-/// macOS: bottom-left is (0, 0) and y increasing upwards
+/// macOS:
+///   Default coordinate system: a bottom-left is (0, 0) and y increasing upwards.
+///   Flipped coordinate system: a top-left is (0, 0) and y increasing downwards.
 #[allow(dead_code)]
 unsafe fn window_position(view: &NSView, x: i32, y: i32, height: f64) -> CGPoint {
-  let frame: CGRect = view.frame();
-  CGPoint::new(x as f64, frame.size.height - y as f64 - height)
+  let is_flipped = {
+    #[cfg(target_os = "macos")]
+    {
+      view.isFlipped()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+      false
+    }
+  };
+
+  if is_flipped {
+    CGPoint::new(x as f64, y as f64)
+  } else {
+    let frame: CGRect = view.frame();
+    CGPoint::new(x as f64, frame.size.height - y as f64 - height)
+  }
 }
 
+/// Wait synchronously for the NSRunLoop to run until a receiver has a message.
 unsafe fn wait_for_blocking_operation<T>(rx: std::sync::mpsc::Receiver<T>) -> Result<T> {
-  let interval = 0.0002;
+  let interval = Duration::from_millis(2);
+  let interval_as_secs = interval.as_secs_f64();
   let limit = 1.;
   let mut elapsed = 0.;
   // run event loop until we get the response back, blocking for at most 3 seconds
   loop {
-    let rl = objc2_foundation::NSRunLoop::mainRunLoop();
-    let d = NSDate::dateWithTimeIntervalSinceNow(interval);
-    rl.runUntilDate(&d);
-    if let Ok(response) = rx.try_recv() {
+    if let Ok(response) = rx.recv_timeout(interval) {
       return Ok(response);
     }
-    elapsed += interval;
+    elapsed += interval_as_secs;
     if elapsed >= limit {
       return Err(Error::Io(std::io::Error::new(
         std::io::ErrorKind::TimedOut,
         "timed out waiting for cookies response",
       )));
     }
+
+    // Go progress the event loop if we didn't get the result
+    let rl = objc2_foundation::NSRunLoop::mainRunLoop();
+    let limit_date = NSDate::dateWithTimeIntervalSinceNow(interval_as_secs);
+
+    let mode = NSString::from_str("NSDefaultRunLoopMode");
+
+    rl.acceptInputForMode_beforeDate(&mode, &limit_date);
   }
 }

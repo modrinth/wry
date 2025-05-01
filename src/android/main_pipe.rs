@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
-use crate::{Error, RGBA};
+use crate::{Error, InitializationScript, RGBA};
 use crossbeam_channel::*;
 use jni::{
   errors::Result as JniResult,
@@ -65,6 +65,7 @@ impl<'a> MainPipe<'a> {
             user_agent,
             initialization_scripts,
             id,
+            javascript_disabled,
             ..
           } = attrs;
 
@@ -74,11 +75,11 @@ impl<'a> MainPipe<'a> {
             string_class,
             self.env.new_string("")?,
           )?;
-          for (i, script) in initialization_scripts.into_iter().enumerate() {
+          for (i, init_script) in initialization_scripts.into_iter().enumerate() {
             self.env.set_object_array_element(
               &initialization_scripts_array,
               i as i32,
-              self.env.new_string(script.0)?,
+              self.env.new_string(init_script.script)?,
             )?;
           }
 
@@ -100,19 +101,43 @@ impl<'a> MainPipe<'a> {
             ],
           )?;
 
-          // set media autoplay
-          self
+          // get settings
+          let web_settings = self
             .env
-            .call_method(&webview, "setAutoPlay", "(Z)V", &[autoplay.into()])?;
+            .call_method(
+              &webview,
+              "getSettings",
+              "()Landroid/webkit/WebSettings;",
+              &[],
+            )?
+            .l()?;
+
+          // set media autoplay
+          self.env.call_method(
+            &web_settings,
+            "setMediaPlaybackRequiresUserGesture",
+            "(Z)V",
+            &[(!autoplay).into()],
+          )?;
 
           // set user-agent
           if let Some(user_agent) = user_agent {
             let user_agent = self.env.new_string(user_agent)?;
             self.env.call_method(
-              &webview,
-              "setUserAgent",
+              &web_settings,
+              "setUserAgentString",
               "(Ljava/lang/String;)V",
               &[(&user_agent).into()],
+            )?;
+          }
+
+          // disable javascript
+          if javascript_disabled {
+            self.env.call_method(
+              &web_settings,
+              "setJavaScriptEnabled",
+              "(Z)V",
+              &[false.into()],
             )?;
           }
 
@@ -316,6 +341,11 @@ impl<'a> MainPipe<'a> {
             load_html(&mut self.env, webview.as_obj(), &html)?;
           }
         }
+        WebViewMessage::Reload => {
+          if let Some(webview) = &self.webview {
+            reload(&mut self.env, webview.as_obj())?;
+          }
+        }
         WebViewMessage::GetCookies(tx, url) => {
           if let Some(webview) = &self.webview {
             let url = self.env.new_string(url)?;
@@ -400,6 +430,11 @@ fn load_html<'a>(env: &mut JNIEnv<'a>, webview: &JObject<'a>, html: &JString<'a>
   Ok(())
 }
 
+fn reload<'a>(env: &mut JNIEnv<'a>, webview: &JObject<'a>) -> JniResult<()> {
+  env.call_method(webview, "reload", "()V", &[])?;
+  Ok(())
+}
+
 fn set_background_color<'a>(
   env: &mut JNIEnv<'a>,
   webview: &JObject<'a>,
@@ -420,6 +455,7 @@ pub(crate) enum WebViewMessage {
   Jni(Box<dyn FnOnce(&mut JNIEnv, &JObject, &JObject) + Send>),
   LoadUrl(String, Option<http::HeaderMap>),
   LoadHtml(String),
+  Reload,
   ClearAllBrowsingData,
   OnDestroy,
 }
@@ -436,7 +472,8 @@ pub(crate) struct CreateWebViewAttributes {
   pub autoplay: bool,
   pub on_webview_created: Option<Box<dyn Fn(super::Context) -> JniResult<()> + Send>>,
   pub user_agent: Option<String>,
-  pub initialization_scripts: Vec<(String, bool)>,
+  pub initialization_scripts: Vec<InitializationScript>,
+  pub javascript_disabled: bool,
 }
 
 // SAFETY: only use this when you are sure the span will be dropped on the same thread it was entered

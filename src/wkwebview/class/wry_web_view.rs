@@ -2,13 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Mutex};
 
 #[cfg(target_os = "macos")]
 use objc2::runtime::ProtocolObject;
-use objc2::{
-  declare_class, mutability::MainThreadOnly, rc::Retained, runtime::Bool, ClassType, DeclaredClass,
-};
+use objc2::{define_class, rc::Retained, runtime::Bool, DeclaredClass};
 #[cfg(target_os = "macos")]
 use objc2_app_kit::{NSDraggingDestination, NSEvent};
 use objc2_foundation::{NSObjectProtocol, NSUUID};
@@ -31,28 +29,21 @@ pub struct WryWebViewIvars {
   pub(crate) drag_drop_handler: Box<dyn Fn(DragDropEvent) -> bool>,
   #[cfg(target_os = "macos")]
   pub(crate) accept_first_mouse: objc2::runtime::Bool,
-  pub(crate) custom_protocol_task_ids: HashMap<usize, Retained<NSUUID>>,
+  #[cfg(target_os = "ios")]
+  pub(crate) input_accessory_view_builder: Option<Box<crate::InputAccessoryViewBuilder>>,
+  pub(crate) custom_protocol_task_ids: Mutex<HashMap<usize, Retained<NSUUID>>>,
 }
 
-declare_class!(
+define_class!(
+  #[unsafe(super(WKWebView))]
+  #[name = "WryWebView"]
+  #[ivars = WryWebViewIvars]
   pub struct WryWebView;
 
-  unsafe impl ClassType for WryWebView {
-    type Super = WKWebView;
-    type Mutability = MainThreadOnly;
-    const NAME: &'static str = "WryWebView";
-  }
-
-  impl DeclaredClass for WryWebView {
-    type Ivars = WryWebViewIvars;
-  }
-
-  unsafe impl WryWebView {
-    #[method(performKeyEquivalent:)]
-    fn perform_key_equivalent(
-      &self,
-      event: &NSEvent,
-    ) -> Bool {
+  /// Overridden NSView methods.
+  impl WryWebView {
+    #[unsafe(method(performKeyEquivalent:))]
+    fn perform_key_equivalent(&self, event: &NSEvent) -> Bool {
       // This is a temporary workaround for https://github.com/tauri-apps/tauri/issues/9426
       // FIXME: When the webview is a child webview, performKeyEquivalent always return YES
       // and stop propagating the event to the window, hence the menu shortcut won't be
@@ -61,19 +52,24 @@ declare_class!(
       if self.ivars().is_child {
         Bool::NO
       } else {
-        unsafe {
-          objc2::msg_send![super(self), performKeyEquivalent: event]
-        }
+        unsafe { objc2::msg_send![super(self), performKeyEquivalent: event] }
       }
     }
 
     #[cfg(target_os = "macos")]
-    #[method(acceptsFirstMouse:)]
-    fn accept_first_mouse(
-      &self,
-      _event: &NSEvent,
-    ) -> Bool {
-        self.ivars().accept_first_mouse
+    #[unsafe(method(acceptsFirstMouse:))]
+    fn accept_first_mouse(&self, _event: &NSEvent) -> Bool {
+      self.ivars().accept_first_mouse
+    }
+
+    #[cfg(target_os = "ios")]
+    #[unsafe(method_id(inputAccessoryView))]
+    fn input_accessory_view(&self) -> Option<Retained<objc2_ui_kit::UIView>> {
+      if let Some(builder) = &self.ivars().input_accessory_view_builder {
+        builder(self)
+      } else {
+        unsafe { objc2::msg_send![super(self), inputAccessoryView] }
+      }
     }
   }
   unsafe impl NSObjectProtocol for WryWebView {}
@@ -81,7 +77,7 @@ declare_class!(
   // Drag & Drop
   #[cfg(target_os = "macos")]
   unsafe impl NSDraggingDestination for WryWebView {
-    #[method(draggingEntered:)]
+    #[unsafe(method(draggingEntered:))]
     fn dragging_entered(
       &self,
       drag_info: &ProtocolObject<dyn objc2_app_kit::NSDraggingInfo>,
@@ -89,7 +85,7 @@ declare_class!(
       drag_drop::dragging_entered(self, drag_info)
     }
 
-    #[method(draggingUpdated:)]
+    #[unsafe(method(draggingUpdated:))]
     fn dragging_updated(
       &self,
       drag_info: &ProtocolObject<dyn objc2_app_kit::NSDraggingInfo>,
@@ -97,7 +93,7 @@ declare_class!(
       drag_drop::dragging_updated(self, drag_info)
     }
 
-    #[method(performDragOperation:)]
+    #[unsafe(method(performDragOperation:))]
     fn perform_drag_operation(
       &self,
       drag_info: &ProtocolObject<dyn objc2_app_kit::NSDraggingInfo>,
@@ -105,31 +101,22 @@ declare_class!(
       drag_drop::perform_drag_operation(self, drag_info)
     }
 
-    #[method(draggingExited:)]
-    fn dragging_exited(
-      &self,
-      drag_info: &ProtocolObject<dyn objc2_app_kit::NSDraggingInfo>,
-    ) {
+    #[unsafe(method(draggingExited:))]
+    fn dragging_exited(&self, drag_info: &ProtocolObject<dyn objc2_app_kit::NSDraggingInfo>) {
       drag_drop::dragging_exited(self, drag_info)
     }
   }
 
   // Synthetic mouse events
   #[cfg(target_os = "macos")]
-  unsafe impl WryWebView {
-    #[method(otherMouseDown:)]
-    fn other_mouse_down(
-      &self,
-      event: &NSEvent,
-    ) {
+  impl WryWebView {
+    #[unsafe(method(otherMouseDown:))]
+    fn other_mouse_down(&self, event: &NSEvent) {
       synthetic_mouse_events::other_mouse_down(self, event)
     }
 
-    #[method(otherMouseUp:)]
-    fn other_mouse_up(
-      &self,
-      event: &NSEvent,
-    ) {
+    #[unsafe(method(otherMouseUp:))]
+    fn other_mouse_up(&self, event: &NSEvent) {
       synthetic_mouse_events::other_mouse_up(self, event)
     }
   }
@@ -137,18 +124,31 @@ declare_class!(
 
 // Custom Protocol Task Checker
 impl WryWebView {
-  pub(crate) fn add_custom_task_key(&mut self, task_id: usize) -> Retained<NSUUID> {
+  pub(crate) fn add_custom_task_key(&self, task_id: usize) -> Retained<NSUUID> {
     let task_uuid = NSUUID::new();
     self
-      .ivars_mut()
+      .ivars()
       .custom_protocol_task_ids
+      .lock()
+      .unwrap()
       .insert(task_id, task_uuid.clone());
     task_uuid
   }
-  pub(crate) fn remove_custom_task_key(&mut self, task_id: usize) {
-    self.ivars_mut().custom_protocol_task_ids.remove(&task_id);
+  pub(crate) fn remove_custom_task_key(&self, task_id: usize) {
+    self
+      .ivars()
+      .custom_protocol_task_ids
+      .lock()
+      .unwrap()
+      .remove(&task_id);
   }
   pub(crate) fn get_custom_task_uuid(&self, task_id: usize) -> Option<Retained<NSUUID>> {
-    self.ivars().custom_protocol_task_ids.get(&task_id).cloned()
+    self
+      .ivars()
+      .custom_protocol_task_ids
+      .lock()
+      .unwrap()
+      .get(&task_id)
+      .cloned()
   }
 }

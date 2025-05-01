@@ -2,7 +2,7 @@ workspace = {}
 
 [package]
 name = "wry"
-version = "0.47.2"
+version = "0.51.2"
 authors = ["Tauri Programme within The Commons Conservancy"]
 edition = "2021"
 license = "Apache-2.0 OR MIT"
@@ -11,6 +11,7 @@ readme = "README.md"
 repository = "https://github.com/tauri-apps/wry"
 documentation = "https://docs.rs/wry"
 categories = ["gui"]
+rust-version = "1.77"
 exclude = ["/.changes", "/.github", "/audits", "/wry-logo.svg"]
 
 [package.metadata.docs.rs]
@@ -25,9 +26,8 @@ rustc-args = ["--cfg", "docsrs"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-default = ["drag-drop", "objc-exception", "protocol", "os-webview"]
+default = ["drag-drop", "protocol", "os-webview", "x11"]
 serde = ["dpi/serde"]
-objc-exception = ["objc2/catch-all"]
 drag-drop = []
 protocol = []
 devtools = []
@@ -41,6 +41,8 @@ os-webview = [
   "webkit2gtk-sys",
   "dep:gtk",
   "soup3",
+]
+x11 = [
   "x11-dl",
   "gdkx11",
 ]
@@ -49,7 +51,7 @@ tracing = ["dep:tracing"]
 [dependencies]
 tracing = { version = "0.1", optional = true }
 once_cell = "1"
-thiserror = "1.0"
+thiserror = "2.0"
 http = "1.1"
 raw-window-handle = { version = "0.6", features = ["std"] }
 dpi = "0.1"
@@ -68,15 +70,14 @@ gdkx11 = { version = "0.18", optional = true }
 percent-encoding = "2.3"
 
 [target."cfg(target_os = \"windows\")".dependencies]
-webview2-com = "0.33"
+webview2-com = "0.37"
 windows-version = "0.1"
-windows-core = "0.58"
+windows-core = "0.61"
 dunce = "1"
 
 [target."cfg(target_os = \"windows\")".dependencies.windows]
-version = "0.58"
+version = "0.61"
 features = [
-  "implement",
   "Win32_Foundation",
   "Win32_Graphics_Gdi",
   "Win32_System_Com",
@@ -93,11 +94,19 @@ features = [
   "Win32_UI_Input_KeyboardAndMouse",
 ]
 
-[target."cfg(any(target_os = \"ios\", target_os = \"macos\"))".dependencies]
+[target.'cfg(target_vendor = "apple")'.dependencies]
 url = "2.5"
-block2 = "0.5"
-objc2 = { version = "0.5", features = ["exception"] }
-objc2-web-kit = { version = "0.2.0", features = [
+block2 = "0.6"
+objc2 = { version = "0.6", features = [
+    "exception",
+    # because `NSUUID::from_bytes` needs it,
+    # and `WebViewBuilderExtDarwin.with_data_store_identifier` crashes otherwise,
+    # see https://github.com/tauri-apps/tauri/issues/12843
+    "disable-encoding-assertions",
+] }
+objc2-web-kit = { version = "0.3.0", default-features = false, features = [
+  "std",
+  "objc2-core-foundation",
   "objc2-app-kit",
   "block2",
   "WKWebView",
@@ -123,7 +132,13 @@ objc2-web-kit = { version = "0.2.0", features = [
   "WKUserScript",
   "WKHTTPCookieStore",
 ] }
-objc2-foundation = { version = "0.2.0", features = [
+objc2-core-foundation = { version = "0.3.0", default-features = false, features = [
+  "std",
+  "CFCGTypes",
+] }
+objc2-foundation = { version = "0.3.0", default-features = false, features = [
+  "std",
+  "objc2-core-foundation",
   "NSURLRequest",
   "NSURL",
   "NSString",
@@ -132,6 +147,7 @@ objc2-foundation = { version = "0.2.0", features = [
   "NSDictionary",
   "NSObject",
   "NSData",
+  "NSEnumerator",
   "NSKeyValueObserving",
   "NSThread",
   "NSJSONSerialization",
@@ -143,8 +159,10 @@ objc2-foundation = { version = "0.2.0", features = [
   "NSRunLoop",
 ] }
 
-[target."cfg(target_os = \"ios\")".dependencies]
-objc2-ui-kit = { version = "0.2.2", features = [
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2-ui-kit = { version = "0.3.0", default-features = false, features = [
+  "std",
+  "objc2-core-foundation",
   "UIResponder",
   "UIScrollView",
   "UIView",
@@ -153,9 +171,13 @@ objc2-ui-kit = { version = "0.2.2", features = [
   "UIEvent",
 ] }
 
-[target."cfg(target_os = \"macos\")".dependencies]
-objc2-app-kit = { version = "0.2.0", features = [
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3.0", default-features = false, features = [
+  "std",
+  "objc2-core-foundation",
   "NSApplication",
+  "NSButton",
+  "NSControl",
   "NSEvent",
   "NSWindow",
   "NSView",
@@ -179,11 +201,11 @@ tao-macros = "0.1"
 libc = "0.2"
 
 [dev-dependencies]
-pollster = "0.3.0"
-tao = "0.29"
-wgpu = "0.19"
-winit = "0.29"
-getrandom = "0.2"
+pollster = "0.4.0"
+tao = "0.33"
+wgpu = "23"
+winit = "0.30"
+getrandom = "0.3"
 http-range = "0.1"
 percent-encoding = "2.3"
 

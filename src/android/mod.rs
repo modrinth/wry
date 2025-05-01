@@ -23,7 +23,6 @@ use raw_window_handle::HasWindowHandle;
 use sha2::{Digest, Sha256};
 use std::{
   borrow::Cow,
-  cell::RefCell,
   collections::HashMap,
   os::fd::{AsFd as _, AsRawFd as _},
   sync::{mpsc::channel, Mutex},
@@ -45,13 +44,13 @@ pub struct Context<'a, 'b> {
   pub webview: &'a JObject<'b>,
 }
 
-pub(crate) struct StaticCell<T>(RefCell<T>);
+pub(crate) struct StaticValue<T>(Mutex<T>);
 
-unsafe impl<T> Send for StaticCell<T> {}
-unsafe impl<T> Sync for StaticCell<T> {}
+unsafe impl<T> Send for StaticValue<T> {}
+unsafe impl<T> Sync for StaticValue<T> {}
 
-impl<T> std::ops::Deref for StaticCell<T> {
-  type Target = RefCell<T>;
+impl<T> std::ops::Deref for StaticValue<T> {
+  type Target = Mutex<T>;
 
   fn deref(&self) -> &Self::Target {
     &self.0
@@ -60,7 +59,7 @@ impl<T> std::ops::Deref for StaticCell<T> {
 
 macro_rules! define_static_handlers {
   ($($var:ident = $type_name:ident { $($fields:ident:$types:ty),+ $(,)? });+ $(;)?) => {
-    $(pub static $var: StaticCell<Option<$type_name>> = StaticCell(RefCell::new(None));
+    $(pub static $var: StaticValue<Option<$type_name>> = StaticValue(Mutex::new(None));
     pub struct $type_name {
       $($fields: $types,)*
     }
@@ -84,8 +83,8 @@ define_static_handlers! {
   ON_LOAD_HANDLER = UnsafeOnPageLoadHandler { handler: Box<dyn Fn(PageLoadEvent, String)> };
 }
 
-pub static WITH_ASSET_LOADER: StaticCell<Option<bool>> = StaticCell(RefCell::new(None));
-pub static ASSET_LOADER_DOMAIN: StaticCell<Option<String>> = StaticCell(RefCell::new(None));
+pub static WITH_ASSET_LOADER: StaticValue<Option<bool>> = StaticValue(Mutex::new(None));
+pub static ASSET_LOADER_DOMAIN: StaticValue<Option<String>> = StaticValue(Mutex::new(None));
 
 pub(crate) static PACKAGE: OnceCell<String> = OnceCell::new();
 
@@ -177,6 +176,7 @@ impl InnerWebView {
       headers,
       autoplay,
       user_agent,
+      javascript_disabled,
       ..
     } = attributes;
 
@@ -208,37 +208,24 @@ impl InnerWebView {
       .map(|id| id.to_string())
       .unwrap_or_else(|| COUNTER.next().to_string());
 
-    MainPipe::send(WebViewMessage::CreateWebView(CreateWebViewAttributes {
-      id: id.clone(),
-      url,
-      html,
-      #[cfg(any(debug_assertions, feature = "devtools"))]
-      devtools,
-      background_color,
-      transparent,
-      headers,
-      on_webview_created,
-      autoplay,
-      user_agent,
-      initialization_scripts: initialization_scripts.clone(),
-    }));
-
-    WITH_ASSET_LOADER.replace(Some(with_asset_loader));
+    WITH_ASSET_LOADER.lock().unwrap().replace(with_asset_loader);
     if let Some(domain) = asset_loader_domain {
-      ASSET_LOADER_DOMAIN.replace(Some(domain));
+      ASSET_LOADER_DOMAIN.lock().unwrap().replace(domain);
     }
 
-    REQUEST_HANDLER.replace(Some(
+    let initialization_scripts_ = initialization_scripts.clone();
+    REQUEST_HANDLER.lock()
+        .unwrap().replace(
       UnsafeRequestHandler::new(Box::new(
         move |webview_id: &str, mut request, is_document_start_script_enabled| {
           let uri = request.uri().to_string();
-          if let Some(custom_protocol) = custom_protocols.iter().find(|(name, _)| {
+          if let Some((custom_protocol_uri, custom_protocol_closure)) = custom_protocols.iter().find(|(name, _)| {
             uri.starts_with(&format!("{scheme}://{}.", name))
           }) {
             let uri_res = uri
               .replace(
-                &format!("{scheme}://{}.", custom_protocol.0),
-                &format!("{}://", custom_protocol.0),
+                &format!("{scheme}://{}.", custom_protocol_uri),
+                &format!("{}://", custom_protocol_uri),
               )
               .parse();
 
@@ -247,7 +234,7 @@ impl InnerWebView {
             }
 
             let (tx, rx) = channel();
-            let initialization_scripts = initialization_scripts.clone();
+            let initialization_scripts = initialization_scripts_.clone();
             let responder: Box<dyn FnOnce(HttpResponse<Cow<'static, [u8]>>)> =
               Box::new(move |mut response| {
                 if !is_document_start_script_enabled {
@@ -273,15 +260,15 @@ impl InnerWebView {
                     let mut hashes = Vec::new();
                     with_html_head(&mut document, |head| {
                       // iterate in reverse order since we are prepending each script to the head tag
-                      for script in initialization_scripts.iter().rev() {
+                      for init_script in initialization_scripts.iter().rev() {
                         let script_el = NodeRef::new_element(
                           QualName::new(None, ns!(html), "script".into()),
                           None,
                         );
-                        script_el.append(NodeRef::new_text(script.0.as_str()));
+                        script_el.append(NodeRef::new_text(init_script.script.as_str()));
                         head.prepend(script_el);
                         if csp.is_some() {
-                          hashes.push(hash_script(script.0.as_str()));
+                          hashes.push(hash_script(init_script.script.as_str()));
                         }
                       }
                     });
@@ -304,29 +291,54 @@ impl InnerWebView {
                 tx.send(response).unwrap();
               });
 
-            (custom_protocol.1)(webview_id, request, RequestAsyncResponder { responder });
+            (custom_protocol_closure)(webview_id, request, RequestAsyncResponder { responder });
             return Some(rx.recv_timeout(MAIN_PIPE_TIMEOUT).unwrap());
           }
           None
         },
-      ))
+      )
     ));
 
     if let Some(i) = ipc_handler {
-      IPC.replace(Some(UnsafeIpc::new(Box::new(i))));
+      IPC.lock().unwrap().replace(UnsafeIpc::new(Box::new(i)));
     }
 
     if let Some(i) = attributes.document_title_changed_handler {
-      TITLE_CHANGE_HANDLER.replace(Some(UnsafeTitleHandler::new(i)));
+      TITLE_CHANGE_HANDLER
+        .lock()
+        .unwrap()
+        .replace(UnsafeTitleHandler::new(i));
     }
 
     if let Some(i) = attributes.navigation_handler {
-      URL_LOADING_OVERRIDE.replace(Some(UnsafeUrlLoadingOverride::new(i)));
+      URL_LOADING_OVERRIDE
+        .lock()
+        .unwrap()
+        .replace(UnsafeUrlLoadingOverride::new(i));
     }
 
     if let Some(h) = attributes.on_page_load_handler {
-      ON_LOAD_HANDLER.replace(Some(UnsafeOnPageLoadHandler::new(h)));
+      ON_LOAD_HANDLER
+        .lock()
+        .unwrap()
+        .replace(UnsafeOnPageLoadHandler::new(h));
     }
+
+    MainPipe::send(WebViewMessage::CreateWebView(CreateWebViewAttributes {
+      id: id.clone(),
+      url,
+      html,
+      #[cfg(any(debug_assertions, feature = "devtools"))]
+      devtools,
+      background_color,
+      transparent,
+      headers,
+      on_webview_created,
+      autoplay,
+      user_agent,
+      initialization_scripts,
+      javascript_disabled,
+    }));
 
     Ok(Self { id })
   }
@@ -385,6 +397,11 @@ impl InnerWebView {
 
   pub fn load_html(&self, html: &str) -> Result<()> {
     MainPipe::send(WebViewMessage::LoadHtml(html.to_string()));
+    Ok(())
+  }
+
+  pub fn reload(&self) -> Result<()> {
+    MainPipe::send(WebViewMessage::Reload);
     Ok(())
   }
 
