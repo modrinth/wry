@@ -143,6 +143,8 @@ impl WebContextExt for super::WebContext {
   where
     F: Fn(crate::WebViewId, Request<Vec<u8>>, RequestAsyncResponder) + 'static,
   {
+    self.register_custom_protocol(name.to_owned());
+
     // Enable secure context
     self
       .os
